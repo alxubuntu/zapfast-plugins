@@ -12,12 +12,24 @@ use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 
 const MAX_OUTPUT: u64 = 64 * 1024;
 const MAX_TEXT: usize = 16 * 1024;
+const MAX_HISTORY: usize = 32;
+const MAX_HISTORY_TEXT: usize = 2 * 1024;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MessageReceived {
     pub account_id: String,
     pub chat_id: String,
     pub message_id: String,
+    pub text: String,
+    #[serde(default)]
+    pub history: Vec<HistoryMessage>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HistoryMessage {
+    pub from_me: bool,
+    pub timestamp: i64,
+    pub text: String,
 }
 
 /// Run one event in a fresh process, without blocking a chat or the UI.
@@ -38,6 +50,15 @@ where
     ensure!(
         !event.account_id.is_empty() && !event.chat_id.is_empty() && !event.message_id.is_empty(),
         "empty event identifier"
+    );
+    ensure!(event.text.len() <= MAX_TEXT, "message text too large");
+    ensure!(event.history.len() <= MAX_HISTORY, "history too large");
+    ensure!(
+        event
+            .history
+            .iter()
+            .all(|message| message.text.len() <= MAX_HISTORY_TEXT),
+        "history message too large"
     );
     let mut command = tokio::process::Command::new(executable);
     command
@@ -161,9 +182,15 @@ mod tests {
             account_id: "account-a".into(),
             chat_id: "chat-b".into(),
             message_id: "message-c".into(),
+            text: "hola".into(),
+            history: vec![HistoryMessage {
+                from_me: true,
+                timestamp: 1,
+                text: "buenos días".into(),
+            }],
         };
         let text = request_draft(&exe, &event, Duration::from_secs(5), |text| async move {
-            text == "en breve te responderemos"
+            text == "Recibí tu mensaje: “hola”. Hay 1 mensaje anterior en esta conversación."
         })
         .await
         .unwrap();
@@ -182,6 +209,8 @@ mod tests {
             account_id: "a".into(),
             chat_id: "b".into(),
             message_id: "c".into(),
+            text: "hola".into(),
+            history: vec![],
         };
         assert!(
             request_draft(&exe, &event, Duration::from_millis(50), |_| async { true })
@@ -200,6 +229,8 @@ mod tests {
             account_id: "a".into(),
             chat_id: "b".into(),
             message_id: "c".into(),
+            text: "hola".into(),
+            history: vec![],
         };
         for request in [
             r#"{"jsonrpc":"2.0","id":1,"method":"draft.set_if_empty","params":{"account_id":"a","chat_id":"other","message_id":"c","text":"x"}}"#,
@@ -248,6 +279,8 @@ esac
             account_id: "a".into(),
             chat_id: "b".into(),
             message_id: "c".into(),
+            text: "hola".into(),
+            history: vec![],
         };
         assert_eq!(
             request_draft(&exe, &event, Duration::from_secs(1), |_| async { false })
@@ -281,6 +314,8 @@ esac
             account_id: "a".into(),
             chat_id: "b".into(),
             message_id: "c".into(),
+            text: "hola".into(),
+            history: vec![],
         };
         let error = request_draft(&exe, &event, Duration::from_secs(1), |_| async { true })
             .await

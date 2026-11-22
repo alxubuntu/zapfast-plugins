@@ -685,28 +685,61 @@ fn header(app: &mut App, ui: &mut egui::Ui, chat: &Chat) -> Rect {
                     let clear_label = crate::i18n::gettext(app.locale, "Clear chat");
                     let copy_number_label = crate::i18n::gettext(app.locale, "Copy number");
                     let close_label = crate::i18n::gettext(app.locale, "Close chat");
+                    let block_label = super::blocking::label(app, &chat.id);
                     let search_label = crate::i18n::gettext(app.locale, "Search messages");
                     let voice_call_label = crate::i18n::gettext(app.locale, "Voice call");
                     let video_call_label = crate::i18n::gettext(app.locale, "Video call");
-                    let width = widgets::menu_width(
-                        ui,
-                        &[
-                            search_label.as_ref(),
-                            voice_call_label.as_ref(),
-                            video_call_label.as_ref(),
-                            info_label.as_ref(),
-                            select_messages_label.as_ref(),
-                            pin_label.as_ref(),
-                            archive_label.as_ref(),
-                            clear_label.as_ref(),
-                            export_label.as_ref(),
-                            leave_label.as_ref(),
-                            copy_number_label.as_ref(),
-                            close_label.as_ref(),
-                            &super::blocking::label(app, &chat.id),
-                        ],
-                        true,
-                    );
+                    let chat_plugins: Vec<_> = if chat.kind == crate::model::ChatKind::Direct {
+                        app.account()
+                            .plugins
+                            .iter()
+                            .filter(|plugin| {
+                                app.account().settings.enabled_plugins.contains(&plugin.id)
+                            })
+                            .map(|plugin| {
+                                let selected = app
+                                    .account()
+                                    .settings
+                                    .plugin_chats
+                                    .get(&plugin.id)
+                                    .is_some_and(|chats| chats.iter().any(|id| id == &chat.id));
+                                (plugin.id.clone(), selected)
+                            })
+                            .collect()
+                    } else {
+                        Vec::new()
+                    };
+                    let plugin_labels: Vec<_> = chat_plugins
+                        .iter()
+                        .map(|(id, selected)| {
+                            format!(
+                                "{} {id}",
+                                crate::i18n::gettext(
+                                    app.locale,
+                                    if *selected { "Disable" } else { "Enable" }
+                                )
+                            )
+                        })
+                        .collect();
+                    let plugins_in_chat = crate::i18n::gettext(app.locale, "Plugins in this chat");
+                    let mut menu_labels = vec![
+                        search_label.as_ref(),
+                        voice_call_label.as_ref(),
+                        video_call_label.as_ref(),
+                        info_label.as_ref(),
+                        select_messages_label.as_ref(),
+                        pin_label.as_ref(),
+                        archive_label.as_ref(),
+                        clear_label.as_ref(),
+                        export_label.as_ref(),
+                        leave_label.as_ref(),
+                        copy_number_label.as_ref(),
+                        close_label.as_ref(),
+                        block_label.as_ref(),
+                        plugins_in_chat.as_ref(),
+                    ];
+                    menu_labels.extend(plugin_labels.iter().map(String::as_str));
+                    let width = widgets::menu_width(ui, &menu_labels, true);
                     // Demo/test: hold this menu open for a screenshot.
                     #[cfg(any(test, feature = "demo"))]
                     if app.open_header_menu.as_deref() == Some(chat.id.as_str()) {
@@ -756,6 +789,21 @@ fn header(app: &mut App, ui: &mut egui::Ui, chat: &Chat) -> Rect {
                                 info_label.as_ref(),
                             ) {
                                 app.actions.push(Action::OpenInfo(chat.id.clone()));
+                            }
+                            if !chat_plugins.is_empty() {
+                                widgets::menu_separator(ui, &palette);
+                                ui.label(plugins_in_chat.as_ref());
+                                for ((id, selected), label) in
+                                    chat_plugins.iter().zip(&plugin_labels)
+                                {
+                                    if widgets::menu_item(ui, &palette, None, label) {
+                                        app.actions.push(Action::EnablePluginForChat {
+                                            id: id.clone(),
+                                            chat: chat.id.clone(),
+                                            enabled: !selected,
+                                        });
+                                    }
+                                }
                             }
                             if widgets::menu_item(
                                 ui,

@@ -3730,9 +3730,22 @@ impl App {
 
     fn apply_backend_event(&mut self, event: Event, live: bool) {
         match event {
-            Event::PluginMessageReceived { chat, message } => {
+            Event::PluginMessageReceived {
+                chat,
+                message,
+                text,
+            } => {
                 let generation = self.account().plugin_generation;
                 for plugin in &self.account().settings.enabled_plugins {
+                    if !self
+                        .account()
+                        .settings
+                        .plugin_chats
+                        .get(plugin)
+                        .is_some_and(|chats| chats.iter().any(|id| id == &chat))
+                    {
+                        continue;
+                    }
                     if self
                         .account()
                         .plugins
@@ -3743,6 +3756,7 @@ impl App {
                             id: plugin.clone(),
                             chat: chat.clone(),
                             message: message.clone(),
+                            text: text.clone(),
                             generation,
                             cancel: self.account().plugin_cancel.subscribe(),
                         });
@@ -3779,6 +3793,12 @@ impl App {
                 reply,
             } => {
                 let enabled = self.account().settings.enabled_plugins.contains(&plugin)
+                    && self
+                        .account()
+                        .settings
+                        .plugin_chats
+                        .get(&plugin)
+                        .is_some_and(|chats| chats.iter().any(|id| id == &chat))
                     && self.account().plugin_generation == generation;
                 let open = live && self.open_chat.as_deref() == Some(chat.as_str());
                 let parked = self.drafts.get(&chat).is_some_and(|text| !text.is_empty())
@@ -9561,6 +9581,30 @@ impl App {
                     account.mark_settings_dirty();
                 }
             }
+            Action::EnablePluginForChat { id, chat, enabled } => {
+                if self.account().settings.enabled_plugins.contains(&id)
+                    && self.account().plugins.iter().any(|plugin| plugin.id == id)
+                    && crate::model::ChatKind::from_id(&chat) == crate::model::ChatKind::Direct
+                {
+                    let account = self.account_mut();
+                    account.plugin_generation = account.plugin_generation.wrapping_add(1);
+                    account
+                        .plugin_cancel
+                        .send_replace(account.plugin_generation);
+                    let chats = account.settings.plugin_chats.entry(id).or_default();
+                    chats.retain(|existing| existing != &chat);
+                    if enabled {
+                        chats.push(chat);
+                    }
+                    if chats.is_empty() {
+                        account
+                            .settings
+                            .plugin_chats
+                            .retain(|_, enabled_chats| !enabled_chats.is_empty());
+                    }
+                    account.mark_settings_dirty();
+                }
+            }
             Action::SearchSettings(text) => self.settings_search = text,
             Action::FocusComposer => {
                 self.focus_search = false;
@@ -14727,6 +14771,10 @@ mod tests {
         let (mut app, mut commands) = two_accounts(directory.path());
         let plugin = "org.example.plugin";
         app.accounts[1].settings.enabled_plugins.push(plugin.into());
+        app.accounts[1]
+            .settings
+            .plugin_chats
+            .insert(plugin.into(), vec!["chat-b".into()]);
         app.accounts[1].plugin_drafts_ready = true;
         app.composer = "visible account text".into();
         app.active = 1;
@@ -14772,6 +14820,27 @@ mod tests {
         assert!(!answer.try_recv().unwrap());
         assert_eq!(app.accounts[1].drafts["chat-b"], "draft-b");
         assert!(commands.try_recv().is_err());
+
+        app.accounts[1].drafts.remove("chat-b");
+        app.accounts[1].settings.plugin_chats.clear();
+        let (reply, mut answer) = tokio::sync::oneshot::channel();
+        app.apply_backend_event(
+            Event::PluginDraftRequested {
+                plugin: plugin.into(),
+                chat: "chat-b".into(),
+                text: "arrived after opt-out".into(),
+                generation: 0,
+                deadline: Instant::now() + Duration::from_secs(1),
+                reply,
+            },
+            false,
+        );
+        assert!(
+            !answer.try_recv().unwrap(),
+            "opt-out invalidates pending drafts"
+        );
+        assert!(!app.accounts[1].drafts.contains_key("chat-b"));
+        assert!(commands.try_recv().is_err());
     }
 
     #[test]
@@ -14788,6 +14857,10 @@ mod tests {
             .settings
             .enabled_plugins
             .push(plugin.id.clone());
+        app.accounts[1]
+            .settings
+            .plugin_chats
+            .insert(plugin.id.clone(), vec!["chat-b".into()]);
         app.accounts[1].plugins.push(plugin);
         app.active = 1;
         app.events_hidden = true;
@@ -14795,19 +14868,31 @@ mod tests {
             Event::PluginMessageReceived {
                 chat: "chat-b".into(),
                 message: "msg-c".into(),
+                text: "hello".into(),
             },
             false,
         );
         assert!(matches!(
             commands.try_recv(),
-            Ok(Command::RunPlugin { id, chat, message, .. })
-                if id == "org.example.plugin" && chat == "chat-b" && message == "msg-c"
+            Ok(Command::RunPlugin { id, chat, message, text, .. })
+                if id == "org.example.plugin" && chat == "chat-b" && message == "msg-c" && text == "hello"
         ));
+        app.accounts[1].settings.plugin_chats.clear();
+        app.apply_backend_event(
+            Event::PluginMessageReceived {
+                chat: "chat-b".into(),
+                message: "not-opted-in".into(),
+                text: "private text".into(),
+            },
+            false,
+        );
+        assert!(commands.try_recv().is_err(), "chat opt-in is required");
         app.accounts[1].settings.enabled_plugins.clear();
         app.apply_backend_event(
             Event::PluginMessageReceived {
                 chat: "chat-b".into(),
                 message: "msg-d".into(),
+                text: "hello again".into(),
             },
             false,
         );
@@ -14876,6 +14961,10 @@ mod tests {
             .settings
             .enabled_plugins
             .push("plugin".into());
+        app.account_mut()
+            .settings
+            .plugin_chats
+            .insert("plugin".into(), vec!["chat-a".into()]);
         app.account_mut().plugin_drafts_ready = true;
         app.open_chat = Some("chat-a".into());
         app.composer = "unsaved".into();
@@ -15064,6 +15153,10 @@ mod tests {
             .settings
             .enabled_plugins
             .push(plugin.clone());
+        app.accounts[1]
+            .settings
+            .plugin_chats
+            .insert(plugin.clone(), vec!["chat-b".into()]);
         app.accounts[1].plugin_drafts_ready = true;
         app.composer = "visible account".into();
         app.active = 1;
@@ -15072,6 +15165,8 @@ mod tests {
             account_id: "2".into(),
             chat_id: "chat-b".into(),
             message_id: "message-c".into(),
+            text: "¿Podemos hablar mañana?".into(),
+            history: vec![],
         };
         let result = zapfast_plugin_host_core::runtime::request_draft(
             &exe,
@@ -15099,12 +15194,12 @@ mod tests {
         assert_eq!(app.composer, "visible account");
         assert_eq!(
             app.accounts[1].drafts["chat-b"],
-            "en breve te responderemos"
+            "Recibí tu mensaje: “¿Podemos hablar mañana?”. Hay 0 mensajes anteriores en esta conversación."
         );
         assert!(matches!(
             commands.try_recv(),
             Ok(Command::SaveDraft { chat, text })
-                if chat == "chat-b" && text == "en breve te responderemos"
+                if chat == "chat-b" && text == "Recibí tu mensaje: “¿Podemos hablar mañana?”. Hay 0 mensajes anteriores en esta conversación."
         ));
         assert!(commands.try_recv().is_err(), "no WhatsApp send command");
     }

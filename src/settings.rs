@@ -825,6 +825,9 @@ pub struct AccountSettings {
     /// Installed plugin IDs enabled for this account.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub enabled_plugins: Vec<String>,
+    /// Chat IDs opted into each plugin, keyed by plugin ID.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub plugin_chats: std::collections::BTreeMap<String, Vec<String>>,
     pub send_read_receipts: bool,
     pub send_typing: bool,
     #[serde(alias = "auto_download_images")]
@@ -852,6 +855,7 @@ impl Default for AccountSettings {
     fn default() -> Self {
         Self {
             enabled_plugins: Vec::new(),
+            plugin_chats: std::collections::BTreeMap::new(),
             send_read_receipts: true,
             send_typing: true,
             auto_download: true,
@@ -871,6 +875,7 @@ impl AccountSettings {
     pub fn from_legacy(settings: &Settings) -> Self {
         Self {
             enabled_plugins: Vec::new(),
+            plugin_chats: std::collections::BTreeMap::new(),
             send_read_receipts: settings.send_read_receipts,
             send_typing: settings.send_typing,
             auto_download: settings.auto_download,
@@ -1355,6 +1360,24 @@ mod tests {
         assert_eq!(Settings::load(&settings_path), settings);
         assert_eq!(AccountSettings::load(&account_path), account);
         assert_eq!(AccountRoster::load(&roster_path).unwrap(), roster);
+    }
+
+    #[test]
+    fn plugin_chat_opt_in_is_saved_per_account_and_old_settings_default_empty() {
+        let legacy: AccountSettings = serde_json::from_str(r#"{"notifications":true}"#).unwrap();
+        assert!(legacy.plugin_chats.is_empty());
+        let settings = AccountSettings {
+            enabled_plugins: vec!["org.example.reply".into()],
+            plugin_chats: [(
+                "org.example.reply".into(),
+                vec!["123@s.whatsapp.net".into()],
+            )]
+            .into(),
+            ..AccountSettings::default()
+        };
+        let encoded = serde_json::to_string(&settings).unwrap();
+        let decoded: AccountSettings = serde_json::from_str(&encoded).unwrap();
+        assert_eq!(decoded, settings);
     }
 
     #[test]

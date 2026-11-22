@@ -2713,6 +2713,11 @@ pub enum Action {
         id: String,
         enabled: bool,
     },
+    EnablePluginForChat {
+        id: String,
+        chat: ChatId,
+        enabled: bool,
+    },
     FetchBlocklist,
     SetBlocked {
         chat: ChatId,

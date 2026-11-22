@@ -8,7 +8,12 @@ description: Local plugin installation and API v1.
 ZapFast Plugins supports local `.zapplugin` ZIP packages without a store or
 central server. In Settings, the Plugins section installs a package once and
 allows it to be enabled or disabled independently for each account.
-Installation does not require rebuilding ZapFast.
+For incoming message plugins, account enablement is not enough: opt each
+individual chat in from its conversation's More menu under "Plugins in this
+chat". Only direct one-to-one chats are eligible. This explicit per-chat
+selection grants the enabled plugin access to incoming text and up to 32
+textual history messages from the previous seven days. Locked chats are not
+eligible. Installation does not require rebuilding ZapFast.
 Unlinking an account clears its plugin enablement and cancels in-flight work.
 
 On Windows, ZapFast Plugins uses its own application and instance identity
@@ -48,16 +53,21 @@ extracts only the executable for its own platform.
 
 The host launches a fresh process for each event, writing newline-delimited
 UTF-8 JSON-RPC 2.0 to stdin and reading it from stdout. Stdout is reserved
-for JSON-RPC. The event is a notification containing only identifiers:
+for JSON-RPC. The notification contains account, chat and message identifiers,
+plus authorized incoming text and bounded local history:
 
 ```json
-{"jsonrpc":"2.0","method":"message.received","params":{"account_id":"1","chat_id":"123@s.whatsapp.net","message_id":"ABC"}}
+{"jsonrpc":"2.0","method":"message.received","params":{"account_id":"1","chat_id":"123@s.whatsapp.net","message_id":"ABC","text":"Hello","history":[{"from_me":true,"timestamp":1700000000,"text":"Hi"}]}}
 ```
 
-The event is for a new incoming direct message, including one received
-while another account or conversation is displayed. Own messages, history
-sync, recovery and duplicates are excluded. The plugin may request a draft
-for the same event:
+History is chronological, local-only, limited to 32 messages from the prior
+seven days, with each history text capped at 2 KiB and the incoming text at
+16 KiB. Only text and captions are exposed; media bytes, protocol payloads,
+keys and database access are not provided. History may be incomplete if the
+phone has not supplied it. The event is for a new incoming direct message,
+including one received while another account or conversation is displayed.
+Own messages, history sync, recovery and duplicates are excluded. The plugin
+may request a draft for the same event:
 
 ```json
 {"jsonrpc":"2.0","id":1,"method":"draft.set_if_empty","params":{"account_id":"1","chat_id":"123@s.whatsapp.net","message_id":"ABC","text":"your draft"}}
@@ -74,8 +84,10 @@ When busy, the host may drop events rather than block the chat.
 
 ## Example
 
-The source is `plugins/example-reply`. It requests the draft
-`en breve te responderemos`. Build it independently:
+The source is `plugins/example-reply`. It demonstrates access to incoming text
+and history, then requests a deterministic draft describing what it received
+and how many prior messages are available. It does not send. Build it
+independently:
 
 ```sh
 cargo build --release --manifest-path plugins/example-reply/Cargo.toml
@@ -109,5 +121,8 @@ native executables for each architecture you distribute.
 The example package and automated, synthetic-data integration tests have
 been exercised on Ubuntu Linux x86-64 with glibc 2.39. The included example
 binary may require a compatible glibc; rebuild it for older systems.
-Windows and macOS builds and live WhatsApp
+The Windows x86-64 example was installed and run by a user on native Windows
+with preview 3, after correcting an access-denied error during installation.
+An automated Windows-target installation test also passed under Wine. These
+checks do not establish full feature coverage. macOS builds and live WhatsApp
 delivery remain to be verified; the Linux tests do not require a real account.

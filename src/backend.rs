@@ -167,6 +167,7 @@ pub enum Command {
         id: String,
         chat: ChatId,
         message: String,
+        text: String,
         generation: u64,
         cancel: tokio::sync::watch::Receiver<u64>,
     },
@@ -1276,6 +1277,7 @@ pub enum Event {
     PluginMessageReceived {
         chat: ChatId,
         message: String,
+        text: String,
     },
     /// The starred messages of one chat, for the mark in the conversation.
     Stars {

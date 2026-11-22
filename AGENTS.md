@@ -11,6 +11,15 @@ protocol. These notes are for coding agents and new contributors.
   operating system permissions of the user. Respect existing drafts and do
   not send a message when a plugin asks to prepare a draft. WhatsApp's terms
   and account restrictions may apply to automation.
+- Plugin installation stages files and atomically renames the directory into
+  place (`plugins/host-core/src/lib.rs`). Close every handle to staged files
+  before the rename: on Windows, open executable or manifest handles can
+  cause access denied (OS error 5), even when Linux succeeds. Keep
+  `installs_windows_executable_and_publishes_manifest` exercising this path
+  on Windows as well as Linux, and distinguish Wine from native testing.
+  The user confirmed the preview 3 fix installs and runs the example on
+  native Windows. Do not recommend administrator privileges as a workaround
+  without first diagnosing the failed operation.
 - Choose dependencies appropriate for this fork and document non-registry
   sources. Preserve upstream attribution and license notices.
 - The protocol comes from whatsapp-rust. Do not reimplement pieces of it

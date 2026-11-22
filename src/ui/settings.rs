@@ -821,7 +821,10 @@ fn sections(app: &App) -> Vec<Section> {
         let enabled = app.account().settings.enabled_plugins.contains(&id);
         plugins.row(
             id.clone(),
-            format!("Version {} · this account", plugin.version),
+            format!(
+                "Version {} · account enabled; choose chats in More",
+                plugin.version
+            ),
             move |ui, app| {
                 if theme::soft_button(
                     ui,

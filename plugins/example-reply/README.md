@@ -16,11 +16,12 @@ Build it independently with:
 cargo build --release --manifest-path plugins/example-reply/Cargo.toml
 ```
 
-It reads newline-delimited JSON-RPC messages on stdin. For a
-`message.received` notification with nonempty `account_id`, `chat_id` and
-`message_id` strings, it writes a `draft.set_if_empty` request with the same
-identifiers and the text `en breve te responderemos`. It never requests
-message sending.
+It reads newline-delimited JSON-RPC messages on stdin. For an opted-in direct
+chat, it receives the incoming text and bounded local history, then writes a
+`draft.set_if_empty` request with the same identifiers. The deterministic
+Spanish draft quotes the incoming text and reports how many history messages
+are available. It never requests message sending. Enable the plugin for the
+account, then opt the chat in through the conversation's More menu.
 
 Native plugins execute with the operating system permissions of the user.
 JSON-RPC does not sandbox them. Install only plugins whose authors and

@@ -6078,10 +6078,25 @@ impl Worker {
             return;
         }
         if plugin_new {
-            self.emit(Event::PluginMessageReceived {
-                chat: chat.clone(),
-                message: message.id.clone(),
-            });
+            let plugin_text = match &message.content {
+                Content::Text { text, .. } | Content::Interactive { text, .. } => {
+                    Some(text.clone())
+                }
+                Content::Image { caption, .. }
+                | Content::Video { caption, .. }
+                | Content::Document { caption, .. } => caption.clone(),
+                _ => None,
+            };
+            if let Some(text) = plugin_text
+                .filter(|text| !text.trim().is_empty())
+                .map(|text| text.chars().take(16 * 1024).collect::<String>())
+            {
+                self.emit(Event::PluginMessageReceived {
+                    chat: chat.clone(),
+                    message: message.id.clone(),
+                    text,
+                });
+            }
         }
         // Only a stored message can be moved to the server's time.
         if message.from_me && message.status == Delivery::Pending {
@@ -7366,9 +7381,50 @@ impl Worker {
                 id,
                 chat,
                 message,
+                text,
                 generation,
                 mut cancel,
             } => {
+                if crate::model::ChatKind::from_id(&chat) != crate::model::ChatKind::Direct {
+                    return;
+                }
+                let Ok(Some(chat_record)) = self.archive.chat(&chat) else {
+                    return;
+                };
+                if chat_record.locked {
+                    return;
+                }
+                let current = self.archive.message(&chat, &message).ok().flatten();
+                let now = current
+                    .as_ref()
+                    .map_or_else(|| jiff::Timestamp::now().as_second(), |row| row.timestamp);
+                let boundary = current
+                    .as_ref()
+                    .map(|row| (row.timestamp, row.id.as_str()))
+                    .unwrap_or((i64::MAX, ""));
+                let history = self
+                    .archive
+                    .messages_range(&chat, now.saturating_sub(7 * 24 * 60 * 60), boundary, 32)
+                    .unwrap_or_default()
+                    .into_iter()
+                    .filter_map(|row| {
+                        let text = match row.content {
+                            Content::Text { text, .. } | Content::Interactive { text, .. } => text,
+                            Content::Image { caption, .. }
+                            | Content::Video { caption, .. }
+                            | Content::Document { caption, .. } => caption.unwrap_or_default(),
+                            _ => String::new(),
+                        };
+                        let text: String = text.chars().take(2 * 1024).collect();
+                        (!text.trim().is_empty()).then_some(
+                            zapfast_plugin_host_core::runtime::HistoryMessage {
+                                from_me: row.from_me,
+                                timestamp: row.timestamp,
+                                text,
+                            },
+                        )
+                    })
+                    .collect();
                 static LIMIT: std::sync::OnceLock<Arc<tokio::sync::Semaphore>> =
                     std::sync::OnceLock::new();
                 static QUEUE: std::sync::OnceLock<Arc<tokio::sync::Semaphore>> =
@@ -7411,6 +7467,8 @@ impl Worker {
                         account_id: account,
                         chat_id: chat.clone(),
                         message_id: message,
+                        text,
+                        history,
                     };
                     let duration = Duration::from_secs(3);
                     let deadline = Instant::now() + duration;
@@ -23076,7 +23134,7 @@ mod receipt_tests {
         let messages: Vec<_> = events
             .try_iter()
             .filter_map(|event| match event {
-                Event::PluginMessageReceived { chat, message } => Some((chat, message)),
+                Event::PluginMessageReceived { chat, message, .. } => Some((chat, message)),
                 _ => None,
             })
             .collect();
@@ -23138,6 +23196,10 @@ mod receipt_tests {
         let package = Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("plugins/example-reply/example-linux-x86_64.zapplugin");
         let manifest = zapfast_plugin_host_core::install(&package, &root, "linux-x86_64").unwrap();
+        worker.archive_message(incoming("stale-message", -700_000), None, None, false, true);
+        let _ = events.try_iter().count();
+        worker.archive_message(incoming("older-message", 90), None, None, false, true);
+        let _ = events.try_iter().count();
         let mut message = wa::Message::default();
         message.conversation = Some("synthetic input".into());
         let info = MessageInfo {
@@ -23152,10 +23214,14 @@ mod receipt_tests {
         };
         worker.ingest(&Arc::new(message), &info);
         let initial: Vec<_> = events.try_iter().collect();
-        let (chat, message) = initial
+        let (chat, message, text) = initial
             .into_iter()
             .find_map(|event| match event {
-                Event::PluginMessageReceived { chat, message } => Some((chat, message)),
+                Event::PluginMessageReceived {
+                    chat,
+                    message,
+                    text,
+                } => Some((chat, message, text)),
                 _ => None,
             })
             .expect("live message reaches the plugin host");
@@ -23165,6 +23231,7 @@ mod receipt_tests {
                 id: manifest.id.clone(),
                 chat: chat.clone(),
                 message,
+                text,
                 generation: 0,
                 cancel: receiver,
             })
@@ -23184,7 +23251,10 @@ mod receipt_tests {
             } => {
                 assert_eq!(plugin, manifest.id);
                 assert_eq!(target, chat);
-                assert_eq!(text, "en breve te responderemos");
+                assert_eq!(
+                    text,
+                    "Recibí tu mensaje: “synthetic input”. Hay 1 mensaje anterior en esta conversación."
+                );
                 reply.send(true).unwrap();
             }
             other => panic!("unexpected event: {other:?}"),

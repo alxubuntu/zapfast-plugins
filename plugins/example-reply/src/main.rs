@@ -21,6 +21,19 @@ fn main() -> io::Result<()> {
         {
             continue;
         }
+        let incoming = params["text"].as_str().unwrap_or_default();
+        if incoming.trim().is_empty() {
+            continue;
+        }
+        let history = params["history"]
+            .as_array()
+            .map_or(0, Vec::len);
+        let excerpt: String = incoming.chars().take(800).collect();
+        let history_label = if history == 1 {
+            "mensaje anterior"
+        } else {
+            "mensajes anteriores"
+        };
         request_id = request_id.wrapping_add(1);
         let request = json!({
             "jsonrpc": "2.0",
@@ -30,7 +43,9 @@ fn main() -> io::Result<()> {
                 "account_id": params["account_id"],
                 "chat_id": params["chat_id"],
                 "message_id": params["message_id"],
-                "text": "en breve te responderemos"
+                "text": format!(
+                    "Recibí tu mensaje: “{excerpt}”. Hay {history} {history_label} en esta conversación."
+                )
             }
         });
         writeln!(stdout, "{request}")?;
