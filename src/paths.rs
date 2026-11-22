@@ -20,15 +20,19 @@ pub struct AppDirs {
 
 impl AppDirs {
     pub fn discover() -> Self {
-        match Self::of("zapfast") {
+        #[cfg(target_os = "windows")]
+        let name = "zapfast-plugins";
+        #[cfg(not(target_os = "windows"))]
+        let name = "zapfast";
+        match Self::of(name) {
             Some(dirs) => dirs,
             None => {
                 let fallback = std::env::current_dir().unwrap_or_default();
                 Self {
-                    config: fallback.join("zapfast-config"),
-                    state: fallback.join("zapfast-state"),
-                    cache: fallback.join("zapfast-cache"),
-                    runtime: fallback.join("zapfast-run"),
+                    config: fallback.join(format!("{name}-config")),
+                    state: fallback.join(format!("{name}-state")),
+                    cache: fallback.join(format!("{name}-cache")),
+                    runtime: fallback.join(format!("{name}-run")),
                 }
             }
         }
@@ -52,6 +56,9 @@ impl AppDirs {
     /// Adopts earlier names, newest first, without replacing existing data.
     /// Call only after acquiring the instance guard, and never for demo runs.
     pub fn adopt_previous_names(&self) -> std::io::Result<()> {
+        #[cfg(target_os = "windows")]
+        return Ok(());
+        #[cfg(not(target_os = "windows"))]
         for name in ["fastsapp", "fastwhatsapp"] {
             if let Some(old) = Self::of(name) {
                 self.adopt(&old)?;
@@ -62,9 +69,11 @@ impl AppDirs {
                 adopt_directory(&from, &to)?;
             }
         }
+        #[cfg(not(target_os = "windows"))]
         Ok(())
     }
 
+    #[cfg(any(test, not(target_os = "windows")))]
     fn adopt(&self, old: &Self) -> std::io::Result<()> {
         for (from, to) in [
             (&old.config, &self.config),
@@ -439,6 +448,16 @@ fn adopt_directory(from: &Path, to: &Path) -> std::io::Result<()> {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn plugin_and_original_paths_are_separate() {
+        let original = super::AppDirs::of("zapfast").expect("original paths");
+        let plugins = super::AppDirs::discover();
+        assert_ne!(plugins.config, original.config);
+        assert_ne!(plugins.state, original.state);
+        assert_ne!(plugins.cache, original.cache);
+        assert_ne!(plugins.runtime, original.runtime);
+    }
     use super::*;
 
     fn root(name: &str) -> PathBuf {

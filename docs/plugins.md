@@ -11,6 +11,10 @@ allows it to be enabled or disabled independently for each account.
 Installation does not require rebuilding ZapFast.
 Unlinking an account clears its plugin enablement and cancels in-flight work.
 
+On Windows, ZapFast Plugins uses its own application and instance identity
+and separate configuration, account and cache folders from ZapFast. It does
+not import the original application's data; link an account separately.
+
 **Only install plugins you trust.** A native plugin runs as a separate local
 process, but it is not sandboxed: it retains the operating system permissions
 of the user running ZapFast, including access to files and the network.

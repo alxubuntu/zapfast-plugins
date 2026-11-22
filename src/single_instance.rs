@@ -17,13 +17,22 @@ use std::time::{Duration, Instant};
 /// Stable wire identity shared with FastsApp so upgrades surface a running
 /// older copy before migrating its session files. On the wire every request
 /// and reply starts with `fastsapp:`.
+#[cfg(not(target_os = "windows"))]
 const NAME: &str = "fastsapp";
+#[cfg(target_os = "windows")]
+const NAME: &str = "zapfast-plugins";
+#[cfg(not(target_os = "windows"))]
 const PREFIX: &str = "fastsapp:";
+#[cfg(target_os = "windows")]
+const PREFIX: &str = "zapfast-plugins:";
 /// What ZapFast answers a request it takes: `fastsapp:ok` on the wire.
 const OK: &str = "ok";
 
 /// Fixed port of copies that predate the lock. They never take it.
+#[cfg(not(target_os = "windows"))]
 const LEGACY_PORT: u16 = 47_119;
+#[cfg(target_os = "windows")]
+const LEGACY_PORT: u16 = 47_120;
 /// Longest request accepted on the legacy port.
 const LEGACY_REQUEST_LIMIT: usize = 256;
 /// Time a client gets to send its whole request on the legacy port.
@@ -104,14 +113,16 @@ pub fn acquire(dir: &Path, waker: &crate::backend::Waker, verb: &str) -> Outcome
     // asked of one surfaces its window rather than running a second ZapFast
     // beside it.
     let legacy = legacy_verb(verb);
-    if legacy_instance_answers(legacy) {
+    if !cfg!(target_os = "windows") && legacy_instance_answers(legacy) {
         return if legacy == verb {
             Outcome::Surfaced
         } else {
             Outcome::Outdated
         };
     }
-    listen_legacy(Arc::clone(&commands), waker.clone());
+    if !cfg!(target_os = "windows") {
+        listen_legacy(Arc::clone(&commands), waker.clone());
+    }
     Outcome::Only(Guard {
         commands,
         _claim: claim,
@@ -182,7 +193,9 @@ pub enum Sent {
 /// Sends one request to the running copy, without becoming it when there is
 /// none: for a command-line action that only makes sense while ZapFast runs.
 pub fn send(dir: &Path, verb: &str) -> Sent {
-    sent(slot(dir).send(verb).map(drop), legacy_instance_answers_ping)
+    sent(slot(dir).send(verb).map(drop), || {
+        !cfg!(target_os = "windows") && legacy_instance_answers_ping()
+    })
 }
 
 /// Reads the result of a request. A copy from before the lock is asked
@@ -555,15 +568,18 @@ mod tests {
         ));
 
         // A launch of an older version.
-        assert_eq!(raw_request(&dir, "fastsapp:show", None), "fastsapp:ok\n");
         assert_eq!(
-            raw_request(&dir, "fastsapp:frobnicate", None),
-            "fastsapp!declined\n",
+            raw_request(&dir, &format!("{PREFIX}show"), None),
+            format!("{PREFIX}ok\n")
+        );
+        assert_eq!(
+            raw_request(&dir, &format!("{PREFIX}frobnicate"), None),
+            format!("{NAME}!declined\n"),
             "which an older copy reads as no answer"
         );
         #[cfg(not(unix))]
         assert_eq!(
-            raw_request(&dir, "fastsapp:show", Some(&"0".repeat(64))),
+            raw_request(&dir, &format!("{PREFIX}show"), Some(&"0".repeat(64))),
             "",
             "a wrong token is refused"
         );

@@ -468,7 +468,11 @@ fn run() -> eframe::Result<()> {
                 )
             });
             eframe::run_native(
-                "ZapFast",
+                if cfg!(target_os = "windows") {
+                    "ZapFast Plugins"
+                } else {
+                    "ZapFast"
+                },
                 native_options(demo_persistence.clone(), geometry, transparent),
                 Box::new(move |cc| {
                     let mut app = lease.take(&cc.egui_ctx);
@@ -614,11 +618,21 @@ fn native_options(
     let default_size = demo_size_arg().unwrap_or([1180.0, 780.0]);
     let demo = demo_persistence.is_some();
     let viewport = egui::ViewportBuilder::default()
-        .with_title(if demo { "ZapFast Demo" } else { "ZapFast" })
+        .with_title(if demo {
+            "ZapFast Demo"
+        } else if cfg!(target_os = "windows") {
+            "ZapFast Plugins"
+        } else {
+            "ZapFast"
+        })
         .with_app_id(if demo {
             "zapfast-demo".to_owned()
         } else {
-            fastframe_desktop::desktop_entry("zapfast")
+            fastframe_desktop::desktop_entry(if cfg!(target_os = "windows") {
+                "zapfast-plugins"
+            } else {
+                "zapfast"
+            })
         });
     // The remembered size and position, from the settings, over the default
     // size. Demo runs keep their fixed screenshot size.
