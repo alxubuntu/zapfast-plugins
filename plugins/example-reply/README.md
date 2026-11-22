@@ -7,6 +7,9 @@ JSON-RPC protocol.
 `example-linux-x86_64.zapplugin` contains the Linux x86-64 executable and
 manifest.
 
+`example-windows-x86_64.zapplugin` contains a separately cross-compiled
+Windows x86-64 executable. It has not been tested on a native Windows system.
+
 Build it independently with:
 
 ```sh
