@@ -1,7 +1,10 @@
 import importlib.util
+import contextlib
+import io
 from pathlib import Path
 import sys
 import unittest
+from unittest import mock
 
 sys.dont_write_bytecode = True
 
@@ -37,6 +40,13 @@ def flagged(found):
 
 
 class DependencySourcesTest(unittest.TestCase):
+    def test_fork_reports_but_does_not_reject_upstream_policy_findings(self):
+        manifest = '[dependencies]\nexample = { git = "https://github.com/other/project" }\n'
+        with mock.patch.object(sources, "tracked_manifests", return_value={"Cargo.toml": manifest}):
+            with contextlib.redirect_stdout(io.StringIO()) as output:
+                self.assertEqual(sources.main(), 0)
+            self.assertIn("this fork does not reject them", output.getvalue())
+
     def test_crates_io_and_crmne_repositories_pass(self):
         manifest = """
 [dependencies]
@@ -136,6 +146,13 @@ def asset_files(**extra):
 
 
 class ReviewEvidenceTest(unittest.TestCase):
+    def test_fork_warns_but_does_not_reject_review_evidence(self):
+        files = asset_files(**{"docs/review/after.png": b"\x89PNG\0"})
+        with mock.patch.object(evidence, "tracked_files", return_value=files):
+            with contextlib.redirect_stdout(io.StringIO()) as output:
+                self.assertEqual(evidence.main(), 0)
+            self.assertIn("permitted in this fork", output.getvalue())
+
     def test_files_the_documentation_uses_pass(self):
         self.assertEqual(evidence.problems(asset_files()), [])
 

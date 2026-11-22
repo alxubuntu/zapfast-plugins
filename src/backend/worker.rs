@@ -23128,6 +23128,71 @@ mod receipt_tests {
         assert_eq!(seen, vec!["live"]);
     }
 
+    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn plugin_worker_runs_the_installed_example_for_a_live_message() {
+        let (mut worker, events, mut inbox, _wa) = worker();
+        let directory = tempfile::tempdir().unwrap();
+        worker.dirs = crate::paths::AppDirs::under(directory.path()).as_account();
+        let root = worker.dirs.plugins_dir();
+        let package = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("plugins/example-reply/example-linux-x86_64.zapplugin");
+        let manifest = zapfast_plugin_host_core::install(&package, &root, "linux-x86_64").unwrap();
+        let mut message = wa::Message::default();
+        message.conversation = Some("synthetic input".into());
+        let info = MessageInfo {
+            id: "event-message".into(),
+            source: MessageSource {
+                chat: PEER.parse().unwrap(),
+                sender: PEER.parse().unwrap(),
+                ..Default::default()
+            },
+            timestamp: whatsapp_rust::wacore::time::from_secs(100).unwrap(),
+            ..Default::default()
+        };
+        worker.ingest(&Arc::new(message), &info);
+        let initial: Vec<_> = events.try_iter().collect();
+        let (chat, message) = initial
+            .into_iter()
+            .find_map(|event| match event {
+                Event::PluginMessageReceived { chat, message } => Some((chat, message)),
+                _ => None,
+            })
+            .expect("live message reaches the plugin host");
+        let (cancel, receiver) = tokio::sync::watch::channel(0);
+        worker
+            .handle_command(Command::RunPlugin {
+                id: manifest.id.clone(),
+                chat: chat.clone(),
+                message,
+                generation: 0,
+                cancel: receiver,
+            })
+            .await;
+        let request =
+            tokio::task::spawn_blocking(move || events.recv_timeout(Duration::from_secs(5)))
+                .await
+                .unwrap()
+                .unwrap();
+        match request {
+            Event::PluginDraftRequested {
+                plugin,
+                chat: target,
+                text,
+                reply,
+                ..
+            } => {
+                assert_eq!(plugin, manifest.id);
+                assert_eq!(target, chat);
+                assert_eq!(text, "en breve te responderemos");
+                reply.send(true).unwrap();
+            }
+            other => panic!("unexpected event: {other:?}"),
+        }
+        assert!(inbox.try_recv().is_err(), "no WhatsApp send command");
+        drop(cancel);
+    }
+
     #[test]
     fn unknown_or_disabled_account_privacy_never_permits_receipts() {
         use whatsapp_rust::wacore::iq::privacy::{

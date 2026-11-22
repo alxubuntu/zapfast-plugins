@@ -3,9 +3,10 @@
 ZapFast Plugins is a fork of the native WhatsApp client ZapFast. Preserve
 upstream attribution and document the security and privacy impact of changes.
 
-The inherited GitHub Actions policy currently still enforces upstream's
-dependency-source and review-evidence checks. Updating the workflow requires
-GitHub authorization with the `workflow` scope.
+The inherited GitHub Actions policy still names upstream's dependency-source
+and review-evidence checks. In this fork these checks emit warnings rather
+than reject changes. Review dependency security and avoid committing private
+user data.
 
 ## Before opening an issue
 

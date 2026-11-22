@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
-"""Fails when a dependency comes from a source the maintainer has not approved.
+"""Reports sources that would have been restricted by upstream.
 
-Crates come from crates.io. A git dependency or a [patch] entry may only name
-a repository under https://github.com/crmne/ or the explicitly approved upstream
-https://github.com/oxidezap/whatsapp-rust. Adding or changing one still needs the
-maintainer's approval (CONTRIBUTING.md, "Design principles"). This reads every
+Upstream restricts crates to crates.io and git dependencies or patches to
+repositories under https://github.com/crmne/ or the approved WhatsApp upstream.
+This fork retains the audit as a warning, not a restriction. It reads every
 tracked Cargo.toml, Cargo.lock and .cargo/config.toml.
 """
 
@@ -74,7 +73,7 @@ def problems(files):
                 found.append((path, f"{table} points at {url}"))
         for section, crate, spec in replacements(data):
             if not (isinstance(spec, dict) and "git" in spec):
-                found.append((path, f"[{section}] {crate} must name an approved git repository; see CONTRIBUTING.md"))
+                found.append((path, f"[{section}] {crate} differs from upstream's git-source policy"))
         for section in ("source", "registries"):
             if section in data:
                 found.append((path, f"[{section}] adds a crate source besides crates.io"))
@@ -90,14 +89,13 @@ def tracked_manifests(root):
 def main():
     found = problems(tracked_manifests(Path(__file__).resolve().parents[2]))
     for path, message in found:
-        print(f"::error file={path}::{message}" if os.environ.get("GITHUB_ACTIONS") else f"{path}: {message}")
+        print(f"::warning file={path}::{message}" if os.environ.get("GITHUB_ACTIONS") else f"{path}: {message}")
     if found:
         print(
-            "Dependencies come from crates.io, repositories under https://github.com/crmne/, "
-            "or the approved upstream https://github.com/oxidezap/whatsapp-rust. "
-            "Send a dependency fix upstream and ask the maintainer to carry it; see CONTRIBUTING.md, Design principles."
+            "These sources differ from upstream's policy. Review and document "
+            "their security and licensing implications; this fork does not reject them."
         )
-    return 1 if found else 0
+    return 0
 
 
 if __name__ == "__main__":

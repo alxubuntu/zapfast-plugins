@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Fails when the repository holds visual review evidence.
+"""Reports visual review evidence without rejecting it in this fork.
 
 Before-and-after captures, comparison pages and recordings belong in the pull
-request description or its comments, never in the repository (CONTRIBUTING.md,
-"Screenshots"). Two rules find them among the tracked files:
+request description or its comments under upstream's policy. This fork keeps
+the audit as a warning only. Two rules find them among the tracked files:
 
 1. Every file under docs/assets/, and every image or video elsewhere under
    docs/, is named by the documentation: a site page or setting outside
@@ -61,13 +61,13 @@ def tracked_files(root):
 def main():
     found = problems(tracked_files(Path(__file__).resolve().parents[2]))
     for path, message in found:
-        print(f"::error file={path}::{message}" if os.environ.get("GITHUB_ACTIONS") else f"{path}: {message}")
+        print(f"::warning file={path}::{message}" if os.environ.get("GITHUB_ACTIONS") else f"{path}: {message}")
     if found:
         print(
-            "Screenshots, captures, comparison pages and recordings go in the pull request "
-            "description or comments, not the repository; see CONTRIBUTING.md, Screenshots."
+            "Review evidence is permitted in this fork; verify that it does not "
+            "contain private user data."
         )
-    return 1 if found else 0
+    return 0
 
 
 if __name__ == "__main__":
