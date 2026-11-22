@@ -291,7 +291,7 @@ mod tests {
         let example = Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../example-reply/example-linux-x86_64.zapplugin");
         let installed = install(&example, dir.path(), "linux-x86_64").unwrap();
-        assert_eq!(installed.id, "org.zapfast.example-reply");
+        assert_eq!(installed.id, "org.zapfast.example-reply-stage1");
         assert!(
             executable(dir.path(), &installed, "linux-x86_64")
                 .unwrap()

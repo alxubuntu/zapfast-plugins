@@ -12,7 +12,7 @@ parser.add_argument("--output", type=Path, required=True)
 args = parser.parse_args()
 name = "bin/example-reply.exe" if args.platform.startswith("windows-") else "bin/example-reply"
 manifest = {
-    "id": "org.zapfast.example-reply",
+    "id": "org.zapfast.example-reply-stage1",
     "version": "0.1.0",
     "api_version": 1,
     "executables": {args.platform: name},
