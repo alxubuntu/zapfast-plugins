@@ -162,6 +162,14 @@ pub struct SendTurn {
 
 #[derive(Debug)]
 pub enum Command {
+    PickPlugin,
+    RunPlugin {
+        id: String,
+        chat: ChatId,
+        message: String,
+        generation: u64,
+        cancel: tokio::sync::watch::Receiver<u64>,
+    },
     FetchBlocklist,
     SetBlocked {
         chat: ChatId,
@@ -1200,6 +1208,15 @@ pub enum Command {
 
 #[derive(Debug)]
 pub enum Event {
+    PluginInstalled(Result<zapfast_plugin_host_core::Manifest, String>),
+    PluginDraftRequested {
+        plugin: String,
+        chat: ChatId,
+        text: String,
+        generation: u64,
+        deadline: Instant,
+        reply: tokio::sync::oneshot::Sender<bool>,
+    },
     Blocklist {
         state: crate::blocking::Blocklist,
         error: Option<crate::blocking::Failure>,
@@ -1254,6 +1271,12 @@ pub enum Event {
     Labels(Vec<crate::model::Label>),
     /// Unsent text stored for each chat, sent once at startup.
     Drafts(Vec<(ChatId, String)>),
+    /// A newly archived live direct message, for the plugin host. This is
+    /// independent of notification/read state and contains no message body.
+    PluginMessageReceived {
+        chat: ChatId,
+        message: String,
+    },
     /// The starred messages of one chat, for the mark in the conversation.
     Stars {
         chat: ChatId,

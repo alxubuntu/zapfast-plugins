@@ -92,14 +92,14 @@ celular ficar online.
 ### É gratuito?
 
 Sim. O ZapFast é código aberto, sob a licença MIT, e o código está
-[no GitHub](https://github.com/crmne/zapfast).
+[no GitHub](https://github.com/alxubuntu/zapfast-plugins).
 
 ### É seguro para a minha conta?
 
 O ZapFast é um cliente não oficial, e usar um pode ir contra os termos do
-WhatsApp. Ele se conecta como um dispositivo comum e nunca automatiza nem
-envia mensagens em massa, mas o WhatsApp ainda pode restringir contas que
-usam clientes não oficiais.
+WhatsApp. Este fork permite plugins locais que automatizam a preparação de
+rascunhos. O WhatsApp pode restringir contas que usam clientes não oficiais
+ou automação.
 
 O ZapFast é um projeto independente, sem vínculo com o WhatsApp LLC ou a Meta.
 WhatsApp é uma marca registrada do WhatsApp LLC.

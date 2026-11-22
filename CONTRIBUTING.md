@@ -1,8 +1,7 @@
-# Contributing to ZapFast
+# Contributing to ZapFast Plugins
 
-ZapFast is a small native WhatsApp client. Changes should improve the desktop
-app without adding a browser engine, telemetry, a hosted backend, or another
-protocol implementation.
+ZapFast Plugins is a fork of the native WhatsApp client ZapFast. Preserve
+upstream attribution and document the security and privacy impact of changes.
 
 ## Before opening an issue
 
@@ -19,13 +18,9 @@ Product boundaries and upstream responsibilities:
 - The protocol comes from [whatsapp-rust](https://github.com/oxidezap/whatsapp-rust).
   A capability it does not support is fixed upstream first, not reimplemented
   here.
-- ZapFast will not embed a browser engine, add telemetry, or introduce a
-  ZapFast-operated service. Features that send message content to a third
-  party are out of scope.
-- ZapFast will never automate WhatsApp: no bots, MCP server, or API,
-  command-line or scripting interface that reads or sends messages, and no
-  scheduled, bulk or automatic replies. WhatsApp's terms forbid automated
-  use and it bans accounts for it.
+- The fork supports locally installed plugins. API v1 prepares drafts but
+  does not expose message sending. Native plugin processes are not sandboxed.
+  WhatsApp's terms and account restrictions may apply to automation.
 
 The guide's [current limitations](https://zapfast.rocks/what-is-zapfast/#what-it-does-not-do-yet)
 describe what is implemented today, not permanent exclusions. Missing features,
@@ -54,14 +49,8 @@ release status stated. Reopen the issue if it persists after updating.
    must keep compiling.
 5. **Small dependency surface.** Reuse the standard library and existing
    crates where practical. A new dependency needs a concrete benefit worth its
-   build time, binary size, maintenance, and security cost. Crates come from
-   crates.io or from repositories under `github.com/crmne/`; never vendor
-   dependency source or point a dependency at another fork. To fix a
-   dependency, send the fix upstream and ask the maintainer to carry it in a
-   crmne fork until a release includes it. The maintainer has explicitly
-   approved pinned commits from the official `github.com/oxidezap/whatsapp-rust`
-   repository once our carried fixes have merged upstream. CI fails on any
-   other source.
+   build time, binary size, maintenance, and security cost. Document
+   non-registry dependencies and preserve their licenses.
 6. **Private data.** The archive is personal data. Never log message contents,
    phone numbers, keys, or QR payloads.
 

@@ -4,42 +4,20 @@ ZapFast is a small native WhatsApp client: Rust, egui, and the
 [whatsapp-rust](https://github.com/oxidezap/whatsapp-rust) library for the
 protocol. These notes are for coding agents and new contributors.
 
-## Product boundaries
+## Fork guidelines
 
-- Keep it a small native client. No browser engine, no telemetry, no
-  hosted backend, no ZapFast-operated account system. Features never send
-  message content to a third party.
-- WhatsApp only. ZapFast is a client for WhatsApp accounts and will not
-  speak other networks or protocols (Matrix, Signal, Telegram, IRC, XMPP)
-  or bridge to them.
-- This fork is intended to support locally installed plugins. Plugin capabilities and
+- This fork supports locally installed plugins. Plugin capabilities and
   security limitations must be documented; native plugins run with the
   operating system permissions of the user. Respect existing drafts and do
   not send a message when a plugin asks to prepare a draft. WhatsApp's terms
   and account restrictions may apply to automation.
-- Do not copy dependency source into this repository. For a dependency fix,
-  use a fork under `github.com/crmne/` pinned to a commit and contribute the
-  fix upstream; egui, winit and rodio already come from such
-  forks. Only the maintainer creates those forks; in a contributor's pull
-  request, send the fix upstream and ask for it to be carried. Use the fork
-  until a release includes the fix. The maintainer has explicitly approved
-  pinned commits from `github.com/oxidezap/whatsapp-rust` once our carried
-  fixes have merged upstream. Never point a dependency at any other fork
-  or source: `.github/scripts/check-dependency-sources.py` fails CI on one.
-- Screenshots, captures, comparison pages and recordings made for a review
-  go in the pull request, never the repository:
-  `.github/scripts/check-review-evidence.py` fails CI on any file under
-  `docs/assets/`, or image or video elsewhere under `docs/`, that no page,
-  top-level file or packaging metadata uses.
+- Choose dependencies appropriate for this fork and document non-registry
+  sources. Preserve upstream attribution and license notices.
 - The protocol comes from whatsapp-rust. Do not reimplement pieces of it
   here, and do not advertise a capability merely because a protobuf field
   for it exists.
 - Prefer portable features and document which platforms were actually tested.
 - Prefer sensible defaults, adding settings where the fork needs them.
-- Pull requests leave the translation template and catalogs
-  (`assets/i18n/`) alone unless the change is a translation itself: the
-  maintainer regenerates them on `main`, and regenerated catalogs bury the
-  real change and conflict with every other pull request.
 - Do not broaden a task into adjacent features or a general refactor.
   Preserve existing user behaviour unless the task changes it.
 - Current limitations are not product exclusions. Before marking a report
@@ -340,8 +318,8 @@ protocol. These notes are for coding agents and new contributors.
 - Chat ids are canonical strings: a chat behind a privacy id (`@lid`) is
   filed under its phone number once the mapping is known. Use
   `Worker::canonical` for anything that arrives as a `Jid`.
-- Updates come from fastframe-update: `src/updates.rs` holds ZapFast's
-  `UpdateConfig` (legacy `fastsapp` names, the publisher key) and the
+- Updates come from fastframe-update: `src/updates.rs` points to this fork's
+  repository and holds the legacy `fastsapp` names and publisher keys and the
   proxy-aware client. It downloads verified GitHub releases and hands
   installation to a helper after an explicit restart action. `main` calls
   `fastframe_update::intercept` before anything else, so `--apply-update`,
@@ -721,77 +699,17 @@ egui pitfalls this code has already hit:
 Use the branch requested for the work. Keep changes focused and test them
 before merging.
 
-Keep `main` linear. Squash outside pull requests into one focused commit while
-preserving contributor credit. Never create or push merge commits. When
-updating a local checkout, use fast-forward-only pulls and rebase unpublished
-local commits if needed. Before pushing, verify that the commits being added
-contain no merge commits. Rewriting published history requires explicit
-maintainer approval, an exact force-with-lease guard, and a recovery ref.
-
-Every normal release, including a release candidate or other prerelease, must
-tag a commit already pushed to and reachable from `origin/main`. A release
-branch is allowed only for an explicitly requested backport to an older
-supported line. Prefer fixing forward on `main`; do not create backport or
-release branches speculatively.
+Preserve contributor credit and never rewrite published history without
+explicit approval and a recovery plan.
 
 ## Releasing
 
 Never use em dashes in user-facing writing, including release titles, release
 notes, and agent responses. Use commas, colons, parentheses, or full stops.
 
-Before writing release notes, read the previous two stable releases of
-`../spotifast` and match their style: a short plain-language summary, `New`
-and `Fixed` sections with bold user-facing results, a `Thanks` section, and
-a full-changelog link. Credit who did what on the relevant item, with issue
-or PR numbers, and acknowledge reporters separately from implementers.
-Include screenshots or short videos of the main features, especially Omarchy
-theme integration when relevant. Capture only synthetic offline demo content,
-never real chats. Upload the media as assets of the GitHub release and link
-those URLs from the notes; never commit screenshots or recordings to the
-repository. Verify every media link and do not leave generated notes
-in place. Describe known limitations honestly.
-
-Do not cut a release for every fix. Work accumulates on `main` until
-there is something substantial to announce: a feature, or a batch of
-fixes worth a changelog entry. Five patch releases in a day is what this
-rule exists to prevent. The exception is a regression in something just
-released, which goes out as soon as it is fixed.
-
-A release is not finished when the tag is pushed. Do these in order:
-
-1. From a clean, up-to-date `main`, bump `version` in `Cargo.toml`, add the
-   release to the `<releases>` list in the Flatpak metainfo, and update
-   `Cargo.lock` with a build. Write the release notes, in the style above, to
-   `packaging/release-notes/vX.Y.Z.md`: the release workflow publishes that
-   file as the release description, and a stable tag without it fails. Link
-   screenshots at the release's asset URLs
-   (`https://github.com/crmne/zapfast/releases/download/vX.Y.Z/NAME.png`).
-   In the same commit, set `zapfast_version` in `docs/_config.yml` and the
-   version menu in `docs/_data/versions.yml` to the new version. The site's
-   `/` is built from the newest release tag and published when the release
-   is, by which time its files exist, so the tag's docs must already name
-   it; a version set after tagging only reaches `/next/` until the release
-   after. The menu lists only the current version, which points to
-   `/download/`, and the Changelog link; do not add older versions to it.
-   Run the full checks, commit, and push `main`. Before tagging, verify the
-   release commit is reachable from `origin/main` so the binaries report the
-   right version and the release contains the canonical history.
-2. Tag `vX.Y.Z` and push the tag. Wait for every platform build, artifact,
-   and `checksums.txt`.
-3. Upload the screenshots to the release as assets with the names the notes
-   link, then open the published release and check the text, every image,
-   and every download link. Never leave generated placeholder notes.
-4. Once the release is published, open zapfast.rocks and check that the
-   download page offers the new version and every download link loads. Set
-   `release_asset_prefix` to `zapfast` and `release_app_name` to `ZapFast`
-   only once those assets exist.
-5. Update the AUR packages from the templates in `packaging/arch/`. The shared
-   packaging workflow generates versions, hashes and `.SRCINFO` after the
-   release exists, and publishes when `PUBLISH_AUR` and the required secrets
-   are configured. Otherwise use `native-packages` to build, stage,
-   review and publish the generated recipes; see `PACKAGING.md`. Validate
-   native builds with `makepkg -f`. A recipe-only `zapfast-git` change does
-   not require an application release.
+Release this fork only from its own repository and signing infrastructure.
+Describe platform coverage and limitations honestly; never claim an upstream
+build contains fork features.
 
 ## Definition of done
 
@@ -846,30 +764,7 @@ mise or mbx.
 - Delete one-off QA, packaging, and release-validation directories (under
   `.cache/` or `~/.cache/`) once their result is recorded.
 
-<!-- github-automation: pull-requests -->
 ## Pull requests
 
-This section is maintained account-wide by
-[crmne/github-automation](https://github.com/crmne/github-automation) and is
-replaced when that policy changes. Do not edit it here. If it does not fit this
-repository, say so in a review or issue, and put repository-specific rules in a
-separate section, which takes precedence.
-
-Review evidence stays out of the repository. Before-and-after screenshots,
-captures, comparison pages, recordings, and anything else made to show
-reviewers a change go in the pull request description or its comments: attach
-the files there, or link a page published elsewhere. Only media the project
-itself uses, such as documentation figures, release-note images, and app
-assets, belongs in the repository.
-
-Dependencies come from their package registry, such as crates.io, RubyGems, or
-npm, or from repositories the maintainer controls, under `github.com/crmne/`
-or this repository's own organization. A git dependency, or a patch, override,
-or replace entry, may point only at such a repository, and adding or changing
-one needs the maintainer's explicit approval. Never point a dependency at a
-contributor's fork or any other source the maintainer does not control. When a
-dependency needs a fix, send it upstream and ask the maintainer to carry it in
-a fork they control until a release includes it.
-
-Reviewers treat either problem in a pull request as a blocker.
-<!-- /github-automation: pull-requests -->
+Document the behaviour, tests, platform coverage, dependency choices and
+security implications of changes. Do not include private user data in reviews.

@@ -312,6 +312,16 @@ pub struct AccountDirs {
 }
 
 impl AccountDirs {
+    /// Plugins are installed once for the app; enablement remains per account.
+    pub fn plugins_dir(&self) -> PathBuf {
+        match self.state.parent() {
+            Some(parent) if parent.file_name().is_some_and(|name| name == "accounts") => {
+                parent.parent().unwrap_or(parent).join("plugins")
+            }
+            _ => self.state.join("plugins"),
+        }
+    }
+
     pub fn ensure(&self) -> std::io::Result<()> {
         for dir in [&self.state, &self.cache] {
             let mut builder = std::fs::DirBuilder::new();

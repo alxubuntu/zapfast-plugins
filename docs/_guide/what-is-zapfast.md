@@ -62,7 +62,7 @@ RAM, compared with 1.13 GB for WhatsApp Web and its Chromium processes.
 
 These are current implementation limits, not permanent product exclusions.
 Feature requests can be discussed within the project's
-[product boundaries](https://github.com/crmne/zapfast/blob/main/CONTRIBUTING.md#before-opening-an-issue).
+[fork guidelines](https://github.com/alxubuntu/zapfast-plugins/blob/feat/plugin-host-v1/CONTRIBUTING.md).
 ZapFast does not currently support:
 
 - Creating call links and screen sharing; status posts, communities and
@@ -80,7 +80,7 @@ copy. Syncing these deletions with the phone and other linked devices is now
 implemented on main, but has not yet been released. See
 [deletion behavior](/using-zapfast/#writing).
 
-When reporting [an issue](https://github.com/crmne/zapfast/issues), include
+When reporting [an issue](https://github.com/alxubuntu/zapfast-plugins/issues), include
 what happened, what you expected, and when it happened. This helps match the
 problem to the log in the state directory.
 
@@ -88,9 +88,9 @@ problem to the log in the state directory.
 
 ZapFast is an **unofficial** client. Using it may be against WhatsApp's terms
 of service. It uses WhatsApp's companion-device protocol, sends normal
-receipts, and does not automate or send messages in bulk. WhatsApp may still
-restrict accounts that use unofficial clients. Use an official client if you
-cannot accept that risk.
+receipts, and this fork supports plugins that can automate draft preparation.
+WhatsApp may restrict accounts using unofficial clients or automation. Use an
+official client if you cannot accept that risk.
 
 ## Prior art
 

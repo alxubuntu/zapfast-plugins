@@ -87,12 +87,11 @@ online.
 ### Is it free?
 
 Yes. ZapFast is open source under the MIT licence, and the code is
-[on GitHub](https://github.com/crmne/zapfast).
+[on GitHub](https://github.com/alxubuntu/zapfast-plugins).
 
 ### Is it safe for my account?
 
 ZapFast is an unofficial client, and using one may be against WhatsApp's
-terms. It links as a normal companion device and never automates or sends
-messages in bulk, but WhatsApp may still restrict accounts that use
-unofficial clients. [Account safety](/what-is-zapfast/#account-safety) says
-more.
+terms. This fork supports local plugins that can automate draft preparation.
+WhatsApp may restrict accounts using unofficial clients or automation. See
+[plugin security](/plugins/) and [account safety](/what-is-zapfast/#account-safety).

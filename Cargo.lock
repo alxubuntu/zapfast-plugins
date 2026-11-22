@@ -8963,9 +8963,23 @@ dependencies = [
  "winit",
  "winresource",
  "wl-clipboard-rs",
+ "zapfast-plugin-host-core",
  "zbus",
  "zbus-secret-service-keyring-store",
  "zeroize",
+ "zip",
+]
+
+[[package]]
+name = "zapfast-plugin-host-core"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "semver",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
  "zip",
 ]
 

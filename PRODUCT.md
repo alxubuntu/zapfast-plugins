@@ -1,4 +1,4 @@
-# Product
+# ZapFast Plugins product
 
 ## Users and purpose
 
@@ -29,12 +29,11 @@ separated action rows.
 
 ## Boundaries and accessibility
 
-No browser engine, hosted backend, telemetry, or ZapFast-operated account system.
-WhatsApp only: no other networks or protocols (Matrix, Signal, Telegram) and no bridges to them.
-No automation: no bots, MCP server, or interface for other programs to read or
-send messages, and no scheduled, bulk or automatic replies.
-Several WhatsApp accounts may be linked locally. Current feature limitations
-are not permanent exclusions; see the product boundaries in [AGENTS.md](AGENTS.md#product-boundaries).
+Local plugins extend the fork without a store or central service. API v1
+offers incoming message identifiers and draft creation, never message sending.
+Native plugins retain the permissions of the user running them. Several
+WhatsApp accounts may be linked locally, and plugin activation is per account.
+See [plugin documentation](docs/plugins.md) and [AGENTS.md](AGENTS.md#fork-guidelines).
 Avoid decorative dashboards and extra nested cards inside message bubbles.
 Retain keyboard operation, zoom, text selection, and light and dark themes.
 No additional accessibility certification target is specified by the project.

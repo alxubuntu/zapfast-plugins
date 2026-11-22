@@ -1,13 +1,12 @@
-//! Package validation for the future ZapFast plugin host.
-//!
-//! This crate is not yet connected to the application.
+//! Package validation for the ZapFast plugin host.
 
 pub mod runtime;
 
 use std::collections::{BTreeMap, HashSet};
 use std::fs::{self, File};
-use std::io::{self, Write};
+use std::io::{self, Read, Write};
 use std::path::{Component, Path, PathBuf};
+use std::sync::Mutex;
 
 use anyhow::{Context, Result, bail, ensure};
 use serde::{Deserialize, Serialize};
@@ -15,6 +14,7 @@ use serde::{Deserialize, Serialize};
 const MAX_PACKAGE: u64 = 64 * 1024 * 1024;
 const MAX_MANIFEST: u64 = 64 * 1024;
 const MAX_ENTRIES: usize = 32;
+static INSTALL_LOCK: Mutex<()> = Mutex::new(());
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -53,6 +53,9 @@ fn safe_path(path: &str) -> bool {
 /// Existing plugin IDs are never overwritten. Only the selected executable
 /// and manifest are extracted, and publication is an atomic directory rename.
 pub fn install(package: &Path, root: &Path, platform: &str) -> Result<Manifest> {
+    let _guard = INSTALL_LOCK
+        .lock()
+        .map_err(|_| anyhow::anyhow!("installer unavailable"))?;
     let file = File::open(package).context("open package")?;
     ensure!(file.metadata()?.len() <= MAX_PACKAGE, "package too large");
     let mut archive = zip::ZipArchive::new(file).context("invalid ZIP")?;
@@ -83,12 +86,7 @@ pub fn install(package: &Path, root: &Path, platform: &str) -> Result<Manifest> 
     };
     ensure!(valid_id(&manifest.id), "invalid plugin ID");
     ensure!(
-        !manifest.version.is_empty()
-            && manifest.version.len() <= 64
-            && manifest
-                .version
-                .bytes()
-                .all(|b| b.is_ascii_alphanumeric() || b".+-".contains(&b)),
+        manifest.version.len() <= 64 && semver::Version::parse(&manifest.version).is_ok(),
         "invalid version"
     );
     ensure!(manifest.api_version == 1, "unsupported API version");
@@ -112,8 +110,22 @@ pub fn install(package: &Path, root: &Path, platform: &str) -> Result<Manifest> 
         .get(platform)
         .context("platform not supported")?;
     fs::create_dir_all(root)?;
+    let root_type = fs::symlink_metadata(root)?.file_type();
+    ensure!(
+        root_type.is_dir() && !root_type.is_symlink(),
+        "invalid plugin directory"
+    );
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(root, fs::Permissions::from_mode(0o700))?;
+    }
     let destination = root.join(&manifest.id);
-    ensure!(!destination.exists(), "plugin ID already installed");
+    ensure!(
+        fs::symlink_metadata(&destination)
+            .is_err_and(|error| error.kind() == io::ErrorKind::NotFound),
+        "plugin ID already installed or inaccessible"
+    );
     let staging = tempfile::Builder::new()
         .prefix(".plugin-")
         .tempdir_in(root)?;
@@ -134,11 +146,61 @@ pub fn install(package: &Path, root: &Path, platform: &str) -> Result<Manifest> 
     manifest_file.flush()?;
     // Keep tempfile ownership until publication. Reject rather than replacing an
     // existing plugin; callers must serialize installation for the same root.
-    if destination.exists() {
-        bail!("plugin ID already installed");
+    if !fs::symlink_metadata(&destination)
+        .is_err_and(|error| error.kind() == io::ErrorKind::NotFound)
+    {
+        bail!("plugin ID already installed or inaccessible");
     }
     fs::rename(staging.path(), &destination)?;
     Ok(manifest)
+}
+
+/// Platform key used in a v1 manifest.
+pub fn platform() -> String {
+    format!("{}-{}", std::env::consts::OS, std::env::consts::ARCH)
+}
+
+/// Read installed packages. Invalid or incompatible entries are omitted.
+pub fn installed(root: &Path, platform: &str) -> Vec<Manifest> {
+    let Ok(entries) = fs::read_dir(root) else {
+        return Vec::new();
+    };
+    let mut manifests = Vec::new();
+    for entry in entries.flatten() {
+        let Ok(kind) = entry.file_type() else {
+            continue;
+        };
+        if !kind.is_dir() {
+            continue;
+        }
+        let Ok(file) = File::open(entry.path().join("manifest.json")) else {
+            continue;
+        };
+        let mut bytes = Vec::new();
+        if file.take(MAX_MANIFEST + 1).read_to_end(&mut bytes).is_err() {
+            continue;
+        }
+        if bytes.len() as u64 > MAX_MANIFEST {
+            continue;
+        }
+        let Ok(manifest) = serde_json::from_slice::<Manifest>(&bytes) else {
+            continue;
+        };
+        if manifest.api_version != 1
+            || !valid_id(&manifest.id)
+            || entry.file_name() != manifest.id.as_str()
+        {
+            continue;
+        }
+        let Some(exe) = executable(root, &manifest, platform) else {
+            continue;
+        };
+        if exe.is_file() {
+            manifests.push(manifest);
+        }
+    }
+    manifests.sort_by(|a, b| a.id.cmp(&b.id));
+    manifests
 }
 
 /// Locate the executable in an installed package using a validated manifest.
@@ -216,5 +278,31 @@ mod tests {
                 .unwrap()
                 .is_file()
         );
+    }
+
+    #[test]
+    fn rejects_invalid_manifest_version_and_api() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("installed");
+        for invalid in [
+            MANIFEST.replace("1.0.0", "not-a-version"),
+            MANIFEST.replace("\"api_version\":1", "\"api_version\":2"),
+        ] {
+            let archive = package(dir.path(), &invalid, &[("bin/plugin", b"test")]);
+            assert!(install(&archive, &root, "linux-x86_64").is_err());
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn never_replaces_a_dangling_symlink() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("installed");
+        fs::create_dir_all(&root).unwrap();
+        let link = root.join("org.example.plugin");
+        std::os::unix::fs::symlink(dir.path().join("missing"), &link).unwrap();
+        let archive = package(dir.path(), MANIFEST, &[("bin/plugin", b"test")]);
+        assert!(install(&archive, &root, "linux-x86_64").is_err());
+        assert!(fs::symlink_metadata(link).unwrap().file_type().is_symlink());
     }
 }

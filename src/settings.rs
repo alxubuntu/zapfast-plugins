@@ -822,6 +822,9 @@ impl Settings {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct AccountSettings {
+    /// Installed plugin IDs enabled for this account.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub enabled_plugins: Vec<String>,
     pub send_read_receipts: bool,
     pub send_typing: bool,
     #[serde(alias = "auto_download_images")]
@@ -848,6 +851,7 @@ pub struct AccountSettings {
 impl Default for AccountSettings {
     fn default() -> Self {
         Self {
+            enabled_plugins: Vec::new(),
             send_read_receipts: true,
             send_typing: true,
             auto_download: true,
@@ -866,6 +870,7 @@ impl Default for AccountSettings {
 impl AccountSettings {
     pub fn from_legacy(settings: &Settings) -> Self {
         Self {
+            enabled_plugins: Vec::new(),
             send_read_receipts: settings.send_read_receipts,
             send_typing: settings.send_typing,
             auto_download: settings.auto_download,

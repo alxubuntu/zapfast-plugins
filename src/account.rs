@@ -23,6 +23,11 @@ pub struct Account {
     pub id: AccountId,
     pub dirs: AccountDirs,
     pub settings: AccountSettings,
+    pub(crate) plugins: Vec<zapfast_plugin_host_core::Manifest>,
+    pub(crate) plugin_drafts_ready: bool,
+    pub(crate) plugin_generation: u64,
+    pub(crate) plugin_cancel: tokio::sync::watch::Sender<u64>,
+    pub(crate) plugin_pickers: HashMap<ChatId, usize>,
     pub(crate) settings_dirty: bool,
     pub backend: Backend,
     pub link: LinkStatus,
@@ -162,6 +167,10 @@ impl Account {
         settings: AccountSettings,
         backend: Backend,
     ) -> Self {
+        let plugins = zapfast_plugin_host_core::installed(
+            &dirs.plugins_dir(),
+            &zapfast_plugin_host_core::platform(),
+        );
         let open_chat = settings.last_chat.clone();
         let chat_filter = match settings
             .list_filter
@@ -176,6 +185,11 @@ impl Account {
             id,
             dirs,
             settings,
+            plugins,
+            plugin_drafts_ready: false,
+            plugin_generation: 0,
+            plugin_cancel: tokio::sync::watch::channel(0).0,
+            plugin_pickers: HashMap::new(),
             settings_dirty: false,
             backend,
             link: LinkStatus::Starting,

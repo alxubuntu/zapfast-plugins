@@ -796,6 +796,8 @@ pub struct App {
     /// applied: they update that account only, never the window's composer,
     /// dialogs, playback, or read state.
     events_hidden: bool,
+    /// Input waiting for the composer in the current UI frame.
+    plugin_input_pending: bool,
     /// A newer release than this build, once GitHub has said so.
     pub update: Option<crate::updates::Release>,
     last_update_check: Option<Instant>,
@@ -1731,6 +1733,7 @@ impl App {
             prefilled: None,
             deferred_account_actions: Vec::new(),
             events_hidden: false,
+            plugin_input_pending: false,
             update: None,
             last_update_check: None,
             show_update: false,
@@ -3678,6 +3681,7 @@ impl App {
     fn handle_events(&mut self) {
         let mut removed = Vec::new();
         let mut deferred = Vec::new();
+        let mut plugin_requests = Vec::new();
         let real_active = self.active;
         for index in 0..self.accounts.len() {
             let events = self.accounts[index].backend.poll();
@@ -3693,6 +3697,12 @@ impl App {
                     removed.push(index);
                     continue;
                 }
+                // Picker results already waiting in this batch belong to the
+                // user's draft, even when a plugin result was queued first.
+                if matches!(event, Event::PluginDraftRequested { .. }) {
+                    plugin_requests.push((index, event));
+                    continue;
+                }
                 self.events_hidden = !live;
                 self.apply_backend_event(event, live);
                 self.events_hidden = false;
@@ -3701,6 +3711,17 @@ impl App {
             deferred.extend(queued.into_iter().map(|action| (origin.clone(), action)));
             self.active = real_active;
         }
+        for (index, event) in plugin_requests {
+            if removed.contains(&index) {
+                continue;
+            }
+            self.active = index;
+            let live = index == real_active;
+            self.events_hidden = !live;
+            self.apply_backend_event(event, live);
+            self.events_hidden = false;
+        }
+        self.active = real_active;
         self.deferred_account_actions.extend(deferred);
         for index in removed.into_iter().rev() {
             self.finish_removed(index);
@@ -3709,6 +3730,90 @@ impl App {
 
     fn apply_backend_event(&mut self, event: Event, live: bool) {
         match event {
+            Event::PluginMessageReceived { chat, message } => {
+                let generation = self.account().plugin_generation;
+                for plugin in &self.account().settings.enabled_plugins {
+                    if self
+                        .account()
+                        .plugins
+                        .iter()
+                        .any(|entry| &entry.id == plugin)
+                    {
+                        self.backend.send(Command::RunPlugin {
+                            id: plugin.clone(),
+                            chat: chat.clone(),
+                            message: message.clone(),
+                            generation,
+                            cancel: self.account().plugin_cancel.subscribe(),
+                        });
+                    }
+                }
+            }
+            Event::PluginInstalled(result) => match result {
+                Ok(manifest) => {
+                    for account in &mut self.accounts {
+                        if !account
+                            .plugins
+                            .iter()
+                            .any(|plugin| plugin.id == manifest.id)
+                        {
+                            account.plugins.push(manifest.clone());
+                        }
+                    }
+                    if live {
+                        self.toast("Plugin installed. Enable it for this account in Settings.");
+                    }
+                }
+                Err(error) => {
+                    if live {
+                        self.toast_error(format!("Could not install plugin: {error}"));
+                    }
+                }
+            },
+            Event::PluginDraftRequested {
+                plugin,
+                chat,
+                text,
+                generation,
+                deadline,
+                reply,
+            } => {
+                let enabled = self.account().settings.enabled_plugins.contains(&plugin)
+                    && self.account().plugin_generation == generation;
+                let open = live && self.open_chat.as_deref() == Some(chat.as_str());
+                let parked = self.drafts.get(&chat).is_some_and(|text| !text.is_empty())
+                    || self
+                        .attachment_drafts
+                        .get(&chat)
+                        .is_some_and(|draft| !draft.pending.is_empty())
+                    || self
+                        .account()
+                        .plugin_pickers
+                        .get(&chat)
+                        .is_some_and(|count| *count > 0);
+                let editing = open
+                    && (self.plugin_input_pending
+                        || !self.composer.is_empty()
+                        || !self.pending.is_empty()
+                        || self.editing.is_some());
+                let accepted = enabled
+                    && self.account().plugin_drafts_ready
+                    && !reply.is_closed()
+                    && Instant::now() < deadline
+                    && !parked
+                    && !editing;
+                if accepted {
+                    if open {
+                        self.composer = text;
+                        self.composer_mentions.clear();
+                        self.store_draft(&chat, &self.composer);
+                    } else {
+                        self.store_draft(&chat, &text);
+                        self.drafts.insert(chat, text);
+                    }
+                }
+                let _ = reply.send(accepted);
+            }
             Event::StorageStats {
                 stats,
                 token,
@@ -3817,6 +3922,7 @@ impl App {
                 self.prune_labels();
             }
             Event::Drafts(drafts) => {
+                self.account_mut().plugin_drafts_ready = true;
                 // Unsent text stored by an earlier session. Text typed in
                 // this session wins over the stored copy.
                 for (chat, text) in drafts {
@@ -4099,12 +4205,27 @@ impl App {
                 paths,
                 documents,
             } => {
+                if let Some(count) = self.account_mut().plugin_pickers.get_mut(&chat) {
+                    *count = count.saturating_sub(1);
+                    if *count == 0 {
+                        self.account_mut().plugin_pickers.remove(&chat);
+                    }
+                }
                 if live && self.open_chat.as_deref() == Some(chat.as_str()) {
                     if documents {
                         self.stage_documents(paths);
                     } else {
                         self.stage_files(paths);
                     }
+                } else if !paths.is_empty() {
+                    let pending = paths.into_iter().map(|path| {
+                        if documents {
+                            Pending::Document(path)
+                        } else {
+                            Pending::File(path)
+                        }
+                    });
+                    self.restore_attachments(&chat, pending, None, false);
                 }
             }
             Event::InteractiveReplyState {
@@ -5154,6 +5275,19 @@ impl App {
                 }
             }
             LinkStatus::LoggedOut => {
+                // A later number linked into this slot must not inherit an
+                // in-flight plugin request or the old number's enablement.
+                let account = self.account_mut();
+                account.plugin_generation = account.plugin_generation.wrapping_add(1);
+                account
+                    .plugin_cancel
+                    .send_replace(account.plugin_generation);
+                account.plugin_drafts_ready = false;
+                account.plugin_pickers.clear();
+                if !account.settings.enabled_plugins.is_empty() {
+                    account.settings.enabled_plugins.clear();
+                    account.mark_settings_dirty();
+                }
                 if live {
                     self.invalidate_composer_undo();
                 }
@@ -8469,6 +8603,11 @@ impl App {
             }
             Action::Attach { documents } => {
                 if let Some(chat) = self.open_chat.clone() {
+                    *self
+                        .account_mut()
+                        .plugin_pickers
+                        .entry(chat.clone())
+                        .or_default() += 1;
                     self.backend.send(Command::PickFiles { chat, documents });
                 }
             }
@@ -9403,6 +9542,24 @@ impl App {
             Action::FocusSettingsSearch => {
                 self.page = Page::Settings;
                 self.focus_settings_search = true;
+            }
+            Action::InstallPlugin => self.backend.send(Command::PickPlugin),
+            Action::EnablePlugin { id, enabled } => {
+                if self.account().plugins.iter().any(|plugin| plugin.id == id) {
+                    let account = self.account_mut();
+                    account.plugin_generation = account.plugin_generation.wrapping_add(1);
+                    account
+                        .plugin_cancel
+                        .send_replace(account.plugin_generation);
+                    account
+                        .settings
+                        .enabled_plugins
+                        .retain(|existing| existing != &id);
+                    if enabled {
+                        account.settings.enabled_plugins.push(id);
+                    }
+                    account.mark_settings_dirty();
+                }
             }
             Action::SearchSettings(text) => self.settings_search = text,
             Action::FocusComposer => {
@@ -10477,7 +10634,21 @@ impl App {
         self.handle_notification_opens();
         // Before this frame's pages: a reader who moved on ends the wait.
         self.end_pending_follow(ctx);
+        self.plugin_input_pending = !self.window_hidden
+            && ctx.input(|input| {
+                !input.raw.dropped_files.is_empty()
+                    || input.events.iter().any(|event| {
+                        matches!(
+                            event,
+                            egui::Event::Text(_)
+                                | egui::Event::Paste(_)
+                                | egui::Event::Ime(_)
+                                | egui::Event::Key { pressed: true, .. }
+                        )
+                    })
+            });
         self.handle_events();
+        self.plugin_input_pending = false;
         for uri in std::mem::take(&mut self.stale_images) {
             crate::image_cache::forget(ctx, &uri);
         }
@@ -14548,6 +14719,394 @@ mod tests {
         app.accounts.push(second);
         app.active = 0;
         (app, commands)
+    }
+
+    #[test]
+    fn plugin_draft_is_scoped_and_preserves_unsaved_composer() {
+        let directory = tempfile::tempdir().unwrap();
+        let (mut app, mut commands) = two_accounts(directory.path());
+        let plugin = "org.example.plugin";
+        app.accounts[1].settings.enabled_plugins.push(plugin.into());
+        app.accounts[1].plugin_drafts_ready = true;
+        app.composer = "visible account text".into();
+        app.active = 1;
+        app.events_hidden = true;
+        let (reply, mut answer) = tokio::sync::oneshot::channel();
+        app.apply_backend_event(
+            Event::PluginDraftRequested {
+                plugin: plugin.into(),
+                chat: "chat-b".into(),
+                text: "draft-b".into(),
+                generation: 0,
+                deadline: Instant::now() + Duration::from_secs(1),
+                reply,
+            },
+            false,
+        );
+        assert!(answer.try_recv().unwrap());
+        assert_eq!(app.composer, "visible account text");
+        assert_eq!(
+            app.accounts[1].drafts.get("chat-b").map(String::as_str),
+            Some("draft-b")
+        );
+        assert!(
+            matches!(commands.try_recv(), Ok(Command::SaveDraft { chat, text }) if chat == "chat-b" && text == "draft-b")
+        );
+        assert!(
+            commands.try_recv().is_err(),
+            "a plugin draft never sends a message"
+        );
+
+        let (reply, mut answer) = tokio::sync::oneshot::channel();
+        app.apply_backend_event(
+            Event::PluginDraftRequested {
+                plugin: plugin.into(),
+                chat: "chat-b".into(),
+                text: "must not replace".into(),
+                generation: 0,
+                deadline: Instant::now() + Duration::from_secs(1),
+                reply,
+            },
+            false,
+        );
+        assert!(!answer.try_recv().unwrap());
+        assert_eq!(app.accounts[1].drafts["chat-b"], "draft-b");
+        assert!(commands.try_recv().is_err());
+    }
+
+    #[test]
+    fn plugin_incoming_dispatches_for_a_hidden_account() {
+        let directory = tempfile::tempdir().unwrap();
+        let (mut app, mut commands) = two_accounts(directory.path());
+        let plugin = zapfast_plugin_host_core::Manifest {
+            id: "org.example.plugin".into(),
+            version: "1.0.0".into(),
+            api_version: 1,
+            executables: Default::default(),
+        };
+        app.accounts[1]
+            .settings
+            .enabled_plugins
+            .push(plugin.id.clone());
+        app.accounts[1].plugins.push(plugin);
+        app.active = 1;
+        app.events_hidden = true;
+        app.apply_backend_event(
+            Event::PluginMessageReceived {
+                chat: "chat-b".into(),
+                message: "msg-c".into(),
+            },
+            false,
+        );
+        assert!(matches!(
+            commands.try_recv(),
+            Ok(Command::RunPlugin { id, chat, message, .. })
+                if id == "org.example.plugin" && chat == "chat-b" && message == "msg-c"
+        ));
+        app.accounts[1].settings.enabled_plugins.clear();
+        app.apply_backend_event(
+            Event::PluginMessageReceived {
+                chat: "chat-b".into(),
+                message: "msg-d".into(),
+            },
+            false,
+        );
+        assert!(
+            commands.try_recv().is_err(),
+            "disabled plugin is not started"
+        );
+    }
+
+    #[test]
+    fn installed_plugin_is_shared_but_enablement_is_per_account() {
+        let directory = tempfile::tempdir().unwrap();
+        let (mut app, _commands) = two_accounts(directory.path());
+        let manifest = zapfast_plugin_host_core::Manifest {
+            id: "org.example.plugin".into(),
+            version: "1.0.0".into(),
+            api_version: 1,
+            executables: Default::default(),
+        };
+        app.apply_backend_event(Event::PluginInstalled(Ok(manifest)), true);
+        assert!(
+            app.accounts
+                .iter()
+                .all(|account| account.plugins.len() == 1)
+        );
+        app.apply(
+            Action::EnablePlugin {
+                id: "org.example.plugin".into(),
+                enabled: true,
+            },
+            &egui::Context::default(),
+        );
+        assert_eq!(
+            app.accounts[0].settings.enabled_plugins,
+            vec!["org.example.plugin"]
+        );
+        assert!(app.accounts[1].settings.enabled_plugins.is_empty());
+        let stored = serde_json::to_string(&app.accounts[0].settings).unwrap();
+        let restored: crate::settings::AccountSettings = serde_json::from_str(&stored).unwrap();
+        assert_eq!(restored.enabled_plugins, vec!["org.example.plugin"]);
+        assert_eq!(
+            app.accounts[0].dirs.plugins_dir(),
+            app.accounts[1].dirs.plugins_dir()
+        );
+    }
+
+    #[test]
+    fn plugin_enablement_and_inflight_requests_end_on_logout() {
+        let mut app = app();
+        app.account_mut()
+            .settings
+            .enabled_plugins
+            .push("plugin".into());
+        let mut cancellation = app.account().plugin_cancel.subscribe();
+        app.handle_link(LinkStatus::LoggedOut, true);
+        assert!(app.account().settings.enabled_plugins.is_empty());
+        assert_eq!(app.account().plugin_generation, 1);
+        assert!(cancellation.has_changed().unwrap());
+        assert_eq!(*cancellation.borrow_and_update(), 1);
+    }
+
+    #[test]
+    fn plugin_draft_respects_open_text_and_deactivation() {
+        let mut app = app();
+        app.account_mut()
+            .settings
+            .enabled_plugins
+            .push("plugin".into());
+        app.account_mut().plugin_drafts_ready = true;
+        app.open_chat = Some("chat-a".into());
+        app.composer = "unsaved".into();
+        let (reply, mut answer) = tokio::sync::oneshot::channel();
+        app.apply_backend_event(
+            Event::PluginDraftRequested {
+                plugin: "plugin".into(),
+                chat: "chat-a".into(),
+                text: "new".into(),
+                generation: 0,
+                deadline: Instant::now() + Duration::from_secs(1),
+                reply,
+            },
+            true,
+        );
+        assert!(!answer.try_recv().unwrap());
+        assert_eq!(app.composer, "unsaved");
+        app.composer.clear();
+        app.stage(Pending::File("unsent-attachment.txt".into()));
+        let (reply, mut answer) = tokio::sync::oneshot::channel();
+        app.apply_backend_event(
+            Event::PluginDraftRequested {
+                plugin: "plugin".into(),
+                chat: "chat-a".into(),
+                text: "new".into(),
+                generation: 0,
+                deadline: Instant::now() + Duration::from_secs(1),
+                reply,
+            },
+            true,
+        );
+        assert!(!answer.try_recv().unwrap());
+        assert!(app.composer.is_empty());
+        app.pending.clear();
+        app.account_mut().plugin_pickers.insert("chat-a".into(), 1);
+        let (reply, mut answer) = tokio::sync::oneshot::channel();
+        app.apply_backend_event(
+            Event::PluginDraftRequested {
+                plugin: "plugin".into(),
+                chat: "chat-a".into(),
+                text: "new".into(),
+                generation: 0,
+                deadline: Instant::now() + Duration::from_secs(1),
+                reply,
+            },
+            true,
+        );
+        assert!(!answer.try_recv().unwrap());
+        app.account_mut().plugin_pickers.clear();
+        app.plugin_input_pending = true;
+        let (reply, mut answer) = tokio::sync::oneshot::channel();
+        app.apply_backend_event(
+            Event::PluginDraftRequested {
+                plugin: "plugin".into(),
+                chat: "chat-a".into(),
+                text: "new".into(),
+                generation: 0,
+                deadline: Instant::now() + Duration::from_secs(1),
+                reply,
+            },
+            true,
+        );
+        assert!(!answer.try_recv().unwrap());
+        assert!(app.composer.is_empty());
+        app.plugin_input_pending = false;
+        app.account_mut().plugin_generation += 1;
+        let (reply, mut answer) = tokio::sync::oneshot::channel();
+        app.apply_backend_event(
+            Event::PluginDraftRequested {
+                plugin: "plugin".into(),
+                chat: "chat-a".into(),
+                text: "new".into(),
+                generation: 0,
+                deadline: Instant::now() + Duration::from_secs(1),
+                reply,
+            },
+            true,
+        );
+        assert!(!answer.try_recv().unwrap());
+        assert!(app.composer.is_empty());
+        let (reply, mut answer) = tokio::sync::oneshot::channel();
+        app.apply_backend_event(
+            Event::PluginDraftRequested {
+                plugin: "plugin".into(),
+                chat: "chat-a".into(),
+                text: "shown in composer".into(),
+                generation: 1,
+                deadline: Instant::now() + Duration::from_secs(1),
+                reply,
+            },
+            true,
+        );
+        assert!(answer.try_recv().unwrap());
+        assert_eq!(app.composer, "shown in composer");
+    }
+
+    #[test]
+    fn plugin_draft_waits_for_picker_results_in_same_batch() {
+        let directory = tempfile::tempdir().unwrap();
+        let (mut app, events) =
+            App::headless(AppDirs::under(directory.path()), Settings::default());
+        app.account_mut()
+            .settings
+            .enabled_plugins
+            .push("plugin".into());
+        app.account_mut().plugin_drafts_ready = true;
+        app.open_chat = Some("chat-a".into());
+        let (reply, mut answer) = tokio::sync::oneshot::channel();
+        events
+            .send(Event::PluginDraftRequested {
+                plugin: "plugin".into(),
+                chat: "chat-a".into(),
+                text: "new".into(),
+                generation: 0,
+                deadline: Instant::now() + Duration::from_secs(1),
+                reply,
+            })
+            .unwrap();
+        events
+            .send(Event::Picked {
+                chat: "chat-a".into(),
+                paths: vec!["attachment.txt".into()],
+                documents: true,
+            })
+            .unwrap();
+        app.handle_events();
+        assert!(!answer.try_recv().unwrap());
+        assert_eq!(app.pending.len(), 1);
+        assert!(app.composer.is_empty());
+    }
+
+    #[test]
+    fn plugin_preserves_attachment_picked_for_an_inactive_account() {
+        let directory = tempfile::tempdir().unwrap();
+        let (mut app, _commands) = two_accounts(directory.path());
+        let chat = "123@s.whatsapp.net";
+        app.accounts[1]
+            .chats
+            .push(Chat::new(chat.into(), "Fixture".into()));
+        app.accounts[1].plugin_pickers.insert(chat.into(), 1);
+        app.accounts[1]
+            .settings
+            .enabled_plugins
+            .push("plugin".into());
+        app.accounts[1].plugin_drafts_ready = true;
+        app.active = 1;
+        app.events_hidden = true;
+        app.apply_backend_event(
+            Event::Picked {
+                chat: chat.into(),
+                paths: vec!["document.txt".into()],
+                documents: true,
+            },
+            false,
+        );
+        assert_eq!(app.accounts[1].attachment_drafts[chat].pending.len(), 1);
+        let (reply, mut answer) = tokio::sync::oneshot::channel();
+        app.apply_backend_event(
+            Event::PluginDraftRequested {
+                plugin: "plugin".into(),
+                chat: chat.into(),
+                text: "new".into(),
+                generation: 0,
+                deadline: Instant::now() + Duration::from_secs(1),
+                reply,
+            },
+            false,
+        );
+        assert!(!answer.try_recv().unwrap());
+        assert!(!app.accounts[1].drafts.contains_key(chat));
+    }
+
+    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+    #[tokio::test]
+    async fn installed_plugin_requests_a_draft_in_the_hidden_account() {
+        let directory = tempfile::tempdir().unwrap();
+        let (mut app, mut commands) = two_accounts(directory.path());
+        let root = app.accounts[1].dirs.plugins_dir();
+        let package = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("plugins/example-reply/example-linux-x86_64.zapplugin");
+        let manifest = zapfast_plugin_host_core::install(&package, &root, "linux-x86_64").unwrap();
+        let exe = zapfast_plugin_host_core::executable(&root, &manifest, "linux-x86_64").unwrap();
+        let plugin = manifest.id.clone();
+        app.accounts[1].plugins.push(manifest);
+        app.accounts[1]
+            .settings
+            .enabled_plugins
+            .push(plugin.clone());
+        app.accounts[1].plugin_drafts_ready = true;
+        app.composer = "visible account".into();
+        app.active = 1;
+        app.events_hidden = true;
+        let event = zapfast_plugin_host_core::runtime::MessageReceived {
+            account_id: "2".into(),
+            chat_id: "chat-b".into(),
+            message_id: "message-c".into(),
+        };
+        let result = zapfast_plugin_host_core::runtime::request_draft(
+            &exe,
+            &event,
+            Duration::from_secs(3),
+            |text| async {
+                let (reply, answer) = tokio::sync::oneshot::channel();
+                app.apply_backend_event(
+                    Event::PluginDraftRequested {
+                        plugin,
+                        chat: "chat-b".into(),
+                        text,
+                        generation: 0,
+                        deadline: Instant::now() + Duration::from_secs(2),
+                        reply,
+                    },
+                    false,
+                );
+                answer.await.unwrap()
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(result, Some(true));
+        assert_eq!(app.composer, "visible account");
+        assert_eq!(
+            app.accounts[1].drafts["chat-b"],
+            "en breve te responderemos"
+        );
+        assert!(matches!(
+            commands.try_recv(),
+            Ok(Command::SaveDraft { chat, text })
+                if chat == "chat-b" && text == "en breve te responderemos"
+        ));
+        assert!(commands.try_recv().is_err(), "no WhatsApp send command");
     }
 
     #[test]

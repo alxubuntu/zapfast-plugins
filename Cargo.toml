@@ -4,9 +4,9 @@ version = "0.21.3"
 edition = "2024"
 rust-version = "1.98"
 license = "MIT"
-description = "A native WhatsApp client built with Rust and egui"
-homepage = "https://zapfast.rocks"
-repository = "https://github.com/crmne/zapfast"
+description = "A native WhatsApp client with local plugin support"
+homepage = "https://github.com/alxubuntu/zapfast-plugins"
+repository = "https://github.com/alxubuntu/zapfast-plugins"
 keywords = ["whatsapp", "chat", "egui", "messaging"]
 categories = ["gui"]
 
@@ -19,6 +19,7 @@ name = "zapfast"
 path = "src/main.rs"
 
 [dependencies]
+zapfast-plugin-host-core = { path = "plugins/host-core" }
 anyhow = "1"
 # Hashes saved stickers by content. Already included through wacore.
 sha2 = "0.11"

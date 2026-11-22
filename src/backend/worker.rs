@@ -2313,7 +2313,10 @@ impl Worker {
                     None => Event::Chats(chats),
                 });
                 self.emit_labels();
-                self.emit(Event::Drafts(self.archive.drafts().unwrap_or_default()));
+                match self.archive.drafts() {
+                    Ok(drafts) => self.emit(Event::Drafts(drafts)),
+                    Err(error) => log::warn!("could not load drafts: {error}"),
+                }
             }
             Err(error) => log::warn!("could not list chats: {error}"),
         }
@@ -3663,6 +3666,7 @@ impl Worker {
         raw: Option<Vec<u8>>,
         push_name: Option<&str>,
         poll_baseline: bool,
+        plugin_live: bool,
     ) {
         let (chat, id) = (message.chat.clone(), message.id.clone());
         if let Some(list) = &list {
@@ -3681,7 +3685,7 @@ impl Worker {
                 self.early.wait_reaction(reaction);
             }
         }
-        self.archive_message(message, raw, push_name, poll_baseline);
+        self.archive_message(message, raw, push_name, poll_baseline, plugin_live);
         if let Some(list) = list
             && let Err(error) = self.archive.set_broadcast_list(&chat, &id, &list)
         {
@@ -5427,12 +5431,17 @@ impl Worker {
                 Err(_) => false,
             };
         let id = row.id.clone();
+        let plugin_live = list.is_none()
+            && !from_me
+            && info.unavailable_request_id.is_none()
+            && (info.source.chat.is_pn() || info.source.chat.is_lid());
         self.archive_list_message(
             list,
             row,
             Some(message.encode_to_vec()),
             push_name.as_deref(),
             poll_baseline,
+            plugin_live,
         );
         if sent_elsewhere {
             self.settle_early_receipts(&chat, &id);
@@ -5999,7 +6008,7 @@ impl Worker {
         };
         let id = row.id.clone();
         let chat = row.chat.clone();
-        self.archive_list_message(list, row, None, push_name.as_deref(), false);
+        self.archive_list_message(list, row, None, push_name.as_deref(), false, false);
         if from_me {
             self.settle_early_receipts(&chat, &id);
         }
@@ -6007,7 +6016,7 @@ impl Worker {
 
     /// Archives a message and emits chat and row updates.
     fn store_message(&mut self, message: Message, raw: Option<Vec<u8>>, push_name: Option<&str>) {
-        self.archive_message(message, raw, push_name, false);
+        self.archive_message(message, raw, push_name, false, false);
     }
 
     /// The phone's "Keep chats archived" once it has said, else Settings'.
@@ -6036,6 +6045,7 @@ impl Worker {
         raw: Option<Vec<u8>>,
         push_name: Option<&str>,
         poll_baseline: bool,
+        plugin_live: bool,
     ) {
         if self.predates_removal(&message.chat, message.timestamp)
             || self.message_was_removed(&message.chat, &message.id)
@@ -6050,7 +6060,9 @@ impl Worker {
             let sender = message.sender.clone();
             self.remember_push_name(&sender, push_name);
         }
-        let existing = self.archive.message(&chat, &message.id).ok().flatten();
+        let lookup = self.archive.message(&chat, &message.id);
+        let plugin_new = plugin_live && matches!(&lookup, Ok(None));
+        let existing = lookup.ok().flatten();
         let is_new = existing.is_none();
         let mut message = message;
         // A duplicate delivery or a history replay reclassifies the same
@@ -6064,6 +6076,12 @@ impl Worker {
         if let Err(error) = self.archive.insert_message(&message, raw.as_deref()) {
             log::warn!("could not store a message: {error}");
             return;
+        }
+        if plugin_new {
+            self.emit(Event::PluginMessageReceived {
+                chat: chat.clone(),
+                message: message.id.clone(),
+            });
         }
         // Only a stored message can be moved to the server's time.
         if message.from_me && message.status == Delivery::Pending {
@@ -7322,6 +7340,109 @@ impl Worker {
             return;
         }
         match command {
+            Command::PickPlugin => {
+                let events = self.events.clone();
+                let waker = self.waker.clone();
+                let root = self.dirs.plugins_dir();
+                tokio::task::spawn_blocking(move || {
+                    let Some(path) = rfd::FileDialog::new()
+                        .set_title("Install plugin")
+                        .add_filter("ZapFast plugin", &["zapplugin"])
+                        .pick_file()
+                    else {
+                        return;
+                    };
+                    let result = zapfast_plugin_host_core::install(
+                        &path,
+                        &root,
+                        &zapfast_plugin_host_core::platform(),
+                    )
+                    .map_err(|error| error.to_string());
+                    let _ = events.send(Event::PluginInstalled(result));
+                    waker.wake();
+                });
+            }
+            Command::RunPlugin {
+                id,
+                chat,
+                message,
+                generation,
+                mut cancel,
+            } => {
+                static LIMIT: std::sync::OnceLock<Arc<tokio::sync::Semaphore>> =
+                    std::sync::OnceLock::new();
+                static QUEUE: std::sync::OnceLock<Arc<tokio::sync::Semaphore>> =
+                    std::sync::OnceLock::new();
+                let Ok(queued) = QUEUE
+                    .get_or_init(|| Arc::new(tokio::sync::Semaphore::new(256)))
+                    .clone()
+                    .try_acquire_owned()
+                else {
+                    return;
+                };
+                let limit = LIMIT
+                    .get_or_init(|| Arc::new(tokio::sync::Semaphore::new(16)))
+                    .clone();
+                let root = self.dirs.plugins_dir();
+                let events = self.events.clone();
+                let waker = self.waker.clone();
+                let account = self.dirs.id.as_str().to_owned();
+                tokio::spawn(async move {
+                    let _queued = queued;
+                    let Ok(_permit) = limit.acquire_owned().await else {
+                        return;
+                    };
+                    if *cancel.borrow() != generation {
+                        return;
+                    }
+                    let platform = zapfast_plugin_host_core::platform();
+                    let Some(manifest) = zapfast_plugin_host_core::installed(&root, &platform)
+                        .into_iter()
+                        .find(|manifest| manifest.id == id)
+                    else {
+                        return;
+                    };
+                    let Some(exe) =
+                        zapfast_plugin_host_core::executable(&root, &manifest, &platform)
+                    else {
+                        return;
+                    };
+                    let event = zapfast_plugin_host_core::runtime::MessageReceived {
+                        account_id: account,
+                        chat_id: chat.clone(),
+                        message_id: message,
+                    };
+                    let duration = Duration::from_secs(3);
+                    let deadline = Instant::now() + duration;
+                    let run = zapfast_plugin_host_core::runtime::request_draft(
+                        &exe,
+                        &event,
+                        duration,
+                        move |text| async move {
+                            let (reply, answer) = oneshot::channel();
+                            if events
+                                .send(Event::PluginDraftRequested {
+                                    plugin: id,
+                                    chat,
+                                    text,
+                                    generation,
+                                    deadline,
+                                    reply,
+                                })
+                                .is_err()
+                            {
+                                return false;
+                            }
+                            waker.wake();
+                            answer.await.unwrap_or(false)
+                        },
+                    );
+                    tokio::select! {
+                        _ = run => {},
+                        _ = cancel.changed() => {},
+                    }
+                });
+            }
             Command::FetchBlocklist => self.fetch_blocklist(),
             Command::SetBlocked { chat, blocked } => self.set_blocked(chat, blocked),
             Command::BlocklistFetched { generation, result } => {
@@ -22944,6 +23065,67 @@ mod receipt_tests {
             status: Delivery::None,
             ..own_message(id, timestamp)
         }
+    }
+
+    #[test]
+    fn plugin_event_is_emitted_only_once_for_a_new_live_row() {
+        let (mut worker, events, _inbox, _wa) = worker();
+        worker.archive_message(incoming("live", 100), None, None, false, true);
+        worker.archive_message(incoming("live", 100), None, None, false, true);
+        worker.archive_message(incoming("history", 101), None, None, false, false);
+        let messages: Vec<_> = events
+            .try_iter()
+            .filter_map(|event| match event {
+                Event::PluginMessageReceived { chat, message } => Some((chat, message)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(messages, vec![(PEER.to_owned(), "live".to_owned())]);
+    }
+
+    #[test]
+    fn plugin_event_filters_live_delivery_and_real_history() {
+        let (mut worker, events, _inbox, _wa) = worker();
+        let mut message = wa::Message::default();
+        message.conversation = Some("fixture".into());
+        let info = |id: &str, chat: &str, own: bool| MessageInfo {
+            id: id.into(),
+            source: MessageSource {
+                chat: chat.parse().unwrap(),
+                sender: chat.parse().unwrap(),
+                is_from_me: own,
+                ..Default::default()
+            },
+            timestamp: whatsapp_rust::wacore::time::from_secs(100).unwrap(),
+            ..Default::default()
+        };
+        worker.ingest(&Arc::new(message.clone()), &info("live", PEER, false));
+        worker.ingest(&Arc::new(message.clone()), &info("live", PEER, false));
+        worker.ingest(&Arc::new(message.clone()), &info("own", PEER, true));
+        worker.ingest(
+            &Arc::new(message.clone()),
+            &info("group", "1-2@g.us", false),
+        );
+        file_history_entries(
+            &mut worker,
+            vec![history_entry(
+                PEER,
+                "history",
+                false,
+                None,
+                message,
+                vec![],
+                None,
+            )],
+        );
+        let seen: Vec<_> = events
+            .try_iter()
+            .filter_map(|event| match event {
+                Event::PluginMessageReceived { message, .. } => Some(message),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(seen, vec!["live"]);
     }
 
     #[test]

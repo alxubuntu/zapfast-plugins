@@ -1,12 +1,11 @@
-# Example reply plugin (work in progress)
+# Example reply plugin
 
-This standalone program is an example for the planned plugin API. ZapFast
-Plugins does not yet include a plugin host or installer, so this example
-cannot currently be installed or used in the application. The protocol and
-manifest are provisional.
+This standalone program is an example for the ZapFast Plugins v1 API.
+See [the plugin guide](../../docs/plugins.md) for installation and the
+JSON-RPC protocol.
 
-`example-linux-x86_64.zapplugin` is a provisional ZIP containing the
-Linux x86-64 executable and manifest. It is not yet usable by the application.
+`example-linux-x86_64.zapplugin` contains the Linux x86-64 executable and
+manifest.
 
 Build it independently with:
 

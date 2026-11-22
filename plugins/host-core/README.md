@@ -1,9 +1,8 @@
-# Experimental plugin host components
+# Plugin host components
 
-This crate is **not connected to ZapFast**. Its package validation and
-one-event subprocess experiment are prototypes, not an installable plugin
-manager or a complete JSON-RPC implementation. In particular, the caller
-must still apply a draft safely and return the actual JSON-RPC response.
+This crate provides package validation and a bounded one-event subprocess
+exchange. ZapFast applies requested drafts through its account-specific
+application state, then returns the outcome as a JSON-RPC response.
 
 `install` validates a ZIP package, checks its manifest, and extracts only
 the executable for the selected platform. Callers must serialize installations

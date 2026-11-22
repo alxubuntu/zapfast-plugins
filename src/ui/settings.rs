@@ -806,6 +806,40 @@ fn sections(app: &App) -> Vec<Section> {
         |ui, app| account(app, ui),
     );
 
+    let mut plugins = Section::new("Plugins".into());
+    plugins.row(
+        "Install plugin",
+        "Choose a local .zapplugin package. Native plugins have your operating system permissions.",
+        move |ui, app| {
+            if theme::soft_button(ui, &palette, None, "Install…", false).clicked() {
+                app.actions.push(Action::InstallPlugin);
+            }
+        },
+    );
+    for plugin in &app.account().plugins {
+        let id = plugin.id.clone();
+        let enabled = app.account().settings.enabled_plugins.contains(&id);
+        plugins.row(
+            id.clone(),
+            format!("Version {} · this account", plugin.version),
+            move |ui, app| {
+                if theme::soft_button(
+                    ui,
+                    &palette,
+                    None,
+                    if enabled { "Disable" } else { "Enable" },
+                    false,
+                )
+                .clicked()
+                {
+                    app.actions.push(Action::EnablePlugin {
+                        id,
+                        enabled: !enabled,
+                    });
+                }
+            },
+        );
+    }
     let mut files = Section::new(translated(locale, "Files"));
     // The account on screen: each number keeps its own archive and media.
     let state = app.account().dirs.state.clone();
@@ -911,6 +945,7 @@ fn sections(app: &App) -> Vec<Section> {
         privacy,
         system,
         account_section,
+        plugins,
         files,
         about_section,
     ]
