@@ -1,4 +1,4 @@
-# ZapFast agent guide
+# ZapFast Plugins agent guide
 
 ZapFast is a small native WhatsApp client: Rust, egui, and the
 [whatsapp-rust](https://github.com/oxidezap/whatsapp-rust) library for the
@@ -12,14 +12,11 @@ protocol. These notes are for coding agents and new contributors.
 - WhatsApp only. ZapFast is a client for WhatsApp accounts and will not
   speak other networks or protocols (Matrix, Signal, Telegram, IRC, XMPP)
   or bridge to them.
-- No automation, ever. ZapFast is for a person reading and writing their
-  own chats by hand. It will not have bots, an MCP server, or any API,
-  command-line, plugin or scripting interface that reads, exports or sends
-  messages for another program, nor scheduled, bulk or automatic replies.
-  WhatsApp's terms forbid automated use, and it bans accounts for it, so such
-  a feature would put every user's account at risk. Opening a chat from a
-  link or `zapfast <number>`, which only shows the chat to the person, is
-  not automation.
+- This fork is intended to support locally installed plugins. Plugin capabilities and
+  security limitations must be documented; native plugins run with the
+  operating system permissions of the user. Respect existing drafts and do
+  not send a message when a plugin asks to prepare a draft. WhatsApp's terms
+  and account restrictions may apply to automation.
 - Do not copy dependency source into this repository. For a dependency fix,
   use a fork under `github.com/crmne/` pinned to a commit and contribute the
   fix upstream; egui, winit and rodio already come from such
@@ -37,12 +34,8 @@ protocol. These notes are for coding agents and new contributors.
 - The protocol comes from whatsapp-rust. Do not reimplement pieces of it
   here, and do not advertise a capability merely because a protobuf field
   for it exists.
-- Nothing ships for one platform only. A feature or theme works on Linux,
-  Windows and macOS, through each platform's own mechanism where they differ
-  and a sensible fallback where one lacks it.
-- Fewer settings. Prefer a good default to a new setting, and never add a
-  setting per preference; a change that needs a new setting needs the
-  maintainer's approval first.
+- Prefer portable features and document which platforms were actually tested.
+- Prefer sensible defaults, adding settings where the fork needs them.
 - Pull requests leave the translation template and catalogs
   (`assets/i18n/`) alone unless the change is a translation itself: the
   maintainer regenerates them on `main`, and regenerated catalogs bury the
@@ -725,12 +718,8 @@ egui pitfalls this code has already hit:
 
 ## Branches
 
-Use trunk-based development. Work on `main` and keep releasable work there.
-Commit directly to `main`, one topic per commit, with each commit compiling and
-passing the relevant checks on its own. Feature branches and pull requests are
-for outside contributors; the maintainer's own work, and work done with the
-maintainer, does not go through them. Do not create or push a branch unless the
-maintainer explicitly asks for one.
+Use the branch requested for the work. Keep changes focused and test them
+before merging.
 
 Keep `main` linear. Squash outside pull requests into one focused commit while
 preserving contributor credit. Never create or push merge commits. When

@@ -1,0 +1,8 @@
+{
+  "id": "org.zapfast.example-reply",
+  "version": "0.1.0",
+  "api_version": 1,
+  "executables": {
+    "linux-x86_64": "bin/zapfast-example-reply"
+  }
+}

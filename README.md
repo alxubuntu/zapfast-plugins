@@ -2,7 +2,11 @@
   <img src="docs/assets/images/logo.svg" alt="ZapFast logo" width="88" height="88">
 </p>
 
-<h1 align="center">ZapFast</h1>
+<h1 align="center">ZapFast Plugins</h1>
+
+> This fork's plugin host is a work in progress. The example in
+> `plugins/example-reply` is not yet installable in ZapFast. The downloads
+> linked below are upstream ZapFast, not builds of this fork.
 
 <p align="center"><strong>WhatsApp, native and fast.</strong><br>A lightweight WhatsApp app for Linux, macOS, and Windows.</p>
 
