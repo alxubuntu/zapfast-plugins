@@ -136,6 +136,7 @@ pub fn install(package: &Path, root: &Path, platform: &str) -> Result<Manifest> 
     let copied = io::copy(&mut source, &mut output)?;
     ensure!(copied == source.size(), "incomplete executable");
     output.flush()?;
+    drop(output);
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
@@ -144,6 +145,7 @@ pub fn install(package: &Path, root: &Path, platform: &str) -> Result<Manifest> 
     let mut manifest_file = File::create(staging.path().join("manifest.json"))?;
     serde_json::to_writer(&mut manifest_file, &manifest)?;
     manifest_file.flush()?;
+    drop(manifest_file);
     // Keep tempfile ownership until publication. Reject rather than replacing an
     // existing plugin; callers must serialize installation for the same root.
     if !fs::symlink_metadata(&destination)
@@ -151,7 +153,7 @@ pub fn install(package: &Path, root: &Path, platform: &str) -> Result<Manifest> 
     {
         bail!("plugin ID already installed or inaccessible");
     }
-    fs::rename(staging.path(), &destination)?;
+    fs::rename(staging.path(), &destination).context("publish plugin directory")?;
     Ok(manifest)
 }
 
@@ -249,6 +251,23 @@ mod tests {
             b"test"
         );
         assert!(install(&archive, &root, "linux-x86_64").is_err());
+    }
+
+    #[test]
+    fn installs_windows_executable_and_publishes_manifest() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("installed");
+        let manifest = MANIFEST
+            .replace("linux-x86_64", "windows-x86_64")
+            .replace("bin/plugin", "bin/plugin.exe");
+        let archive = package(dir.path(), &manifest, &[("bin/plugin.exe", b"MZ test")]);
+        let plugin = install(&archive, &root, "windows-x86_64").unwrap();
+        assert_eq!(
+            fs::read(root.join(&plugin.id).join("bin/plugin.exe")).unwrap(),
+            b"MZ test"
+        );
+        assert!(root.join(&plugin.id).join("manifest.json").is_file());
+        assert_eq!(installed(&root, "windows-x86_64").len(), 1);
     }
 
     #[test]

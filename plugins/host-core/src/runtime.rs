@@ -145,7 +145,7 @@ where
     .context("plugin timed out")?
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
 
