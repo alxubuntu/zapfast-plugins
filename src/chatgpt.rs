@@ -11,6 +11,8 @@ use serde_json::Value;
 use sha2::{Digest, Sha256};
 use zeroize::Zeroizing;
 
+mod credential_store;
+
 const ISSUER: &str = "https://auth.openai.com";
 const AUTHORIZE: &str = "https://auth.openai.com/api/accounts/authorize";
 const TOKEN: &str = "https://auth.openai.com/api/accounts/oauth/token";
@@ -262,11 +264,7 @@ pub async fn sign_out() -> Result<bool> {
     }
     blocking(|| {
         let store = crate::archive::encryption::platform_store()?;
-        let entry = store.build(KEYRING_SERVICE, KEYRING_ACCOUNT, None)?;
-        match entry.delete_credential() {
-            Ok(()) | Err(keyring_core::Error::NoEntry) => Ok(()),
-            Err(error) => Err(anyhow::anyhow!(error)),
-        }
+        credential_store::remove(&*store)
     })
     .await?;
     Ok(revoked)
@@ -274,17 +272,12 @@ pub async fn sign_out() -> Result<bool> {
 
 pub fn connection() -> Result<Option<Credentials>> {
     let store = crate::archive::encryption::platform_store()?;
-    let entry = store.build(KEYRING_SERVICE, KEYRING_ACCOUNT, None)?;
-    match entry.get_secret() {
-        Ok(secret) => {
-            let secret = Zeroizing::new(secret);
-            let credentials = serde_json::from_slice(secret.as_slice())
-                .context("stored ChatGPT credentials are invalid")?;
-            Ok(Some(credentials))
-        }
-        Err(keyring_core::Error::NoEntry) => Ok(None),
-        Err(error) => Err(anyhow::anyhow!(error).context("read ChatGPT keyring entry")),
-    }
+    credential_store::load(&*store)?
+        .map(|secret| {
+            serde_json::from_slice(secret.as_slice())
+                .context("stored ChatGPT credentials are invalid")
+        })
+        .transpose()
 }
 
 /// Refresh a stored access token, persisting token rotation before use.
@@ -598,10 +591,8 @@ fn verify_id_token_signature(
 
 fn save_credentials(credentials: &Credentials) -> Result<()> {
     let store = crate::archive::encryption::platform_store()?;
-    let entry = store.build(KEYRING_SERVICE, KEYRING_ACCOUNT, None)?;
     let bytes = Zeroizing::new(serde_json::to_vec(credentials)?);
-    entry.set_secret(bytes.as_slice())?;
-    Ok(())
+    credential_store::save(&*store, bytes.as_slice())
 }
 
 fn load_registration() -> Result<Option<Registration>> {

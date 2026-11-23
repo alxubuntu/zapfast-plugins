@@ -24,6 +24,9 @@ browser flow. ZapFast uses OAuth with PKCE, validates the returned ID token,
 and stores tokens in the operating system keyring. Disconnect attempts to
 revoke the refresh token and always removes the local credential; the UI
 reports when remote revocation could not be confirmed.
+Large credentials are split across bounded keyring entries to support Windows.
+An interrupted update can leave unused parts in the keyring; disconnect removes
+both active and staged parts.
 
 The assistant is off until you explicitly enable it after the privacy notice.
 Once enabled, it considers new messages in unread, unlocked, one-to-one chats
