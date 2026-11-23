@@ -24,6 +24,10 @@ browser flow. ZapFast uses OAuth with PKCE, validates the returned ID token,
 and stores tokens in the operating system keyring. Disconnect attempts to
 revoke the refresh token and always removes the local credential; the UI
 reports when remote revocation could not be confirmed.
+After disconnecting, the next connection starts a new registration without
+suggesting the previous account. OpenAI may still use the browser's own session;
+choose a different account there or sign out in the browser if needed. The
+stable host identifier is retained.
 Large credentials are split across bounded keyring entries to support Windows.
 An interrupted update can leave unused parts in the keyring; disconnect removes
 both active and staged parts.

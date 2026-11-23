@@ -92,15 +92,9 @@ pub async fn sign_in() -> Result<Credentials> {
         .encode(Sha256::digest(verifier.as_bytes()));
     let host_id = blocking(load_or_create_host_id).await?;
     let returning = blocking(connection).await?;
-    let saved_registration = blocking(load_registration).await?;
-    let registration = match &returning {
-        Some(credentials) => Some(Registration {
-            client_id: credentials.client_id.clone(),
-            subject: credentials.subject.clone(),
-            email: credentials.email.clone(),
-        }),
-        None => saved_registration,
-    };
+    // A saved registration belongs to one OpenAI account. Once disconnected,
+    // a new sign-in must not silently select that account again.
+    let registration = registration_for_sign_in(returning.as_ref());
     let requested_client_id = registration
         .as_ref()
         .map_or("dynamic_agent_client", |registration| {
@@ -125,18 +119,8 @@ pub async fn sign_in() -> Result<Credentials> {
             .append_pair("nonce", &nonce)
             .append_pair("code_challenge_method", "S256")
             .append_pair("code_challenge", &challenge);
-        if let Some(registration) = &registration {
-            if let Some(returning) = &returning {
-                query.append_pair("id_token_hint", &returning.id_token);
-            }
-            query.append_pair(
-                "login_hint",
-                registration.email.as_deref().unwrap_or_default(),
-            );
-        } else {
-            query.append_pair("agent_name_hint", "ZapFast");
-        }
     }
+    add_sign_in_hints(&mut authorize, returning.as_ref());
     open::that(authorize.as_str()).context("open ChatGPT sign-in in the browser")?;
 
     let expected_state = state.clone();
@@ -215,6 +199,26 @@ pub async fn sign_in() -> Result<Credentials> {
     })
     .await?;
     Ok(credentials)
+}
+
+fn registration_for_sign_in(returning: Option<&Credentials>) -> Option<Registration> {
+    returning.map(|credentials| Registration {
+        client_id: credentials.client_id.clone(),
+        subject: credentials.subject.clone(),
+        email: credentials.email.clone(),
+    })
+}
+
+fn add_sign_in_hints(authorize: &mut reqwest::Url, returning: Option<&Credentials>) {
+    let mut query = authorize.query_pairs_mut();
+    if let Some(credentials) = returning {
+        query.append_pair("id_token_hint", &credentials.id_token);
+        if let Some(email) = &credentials.email {
+            query.append_pair("login_hint", email);
+        }
+    } else {
+        query.append_pair("agent_name_hint", "ZapFast");
+    }
 }
 
 /// Revokes and clears local credentials. The stable host ID is retained, as
@@ -595,19 +599,6 @@ fn save_credentials(credentials: &Credentials) -> Result<()> {
     credential_store::save(&*store, bytes.as_slice())
 }
 
-fn load_registration() -> Result<Option<Registration>> {
-    let store = crate::archive::encryption::platform_store()?;
-    let entry = store.build(KEYRING_SERVICE, REGISTRATION_ACCOUNT, None)?;
-    match entry.get_secret() {
-        Ok(secret) => {
-            let secret = Zeroizing::new(secret);
-            Ok(Some(serde_json::from_slice(secret.as_slice())?))
-        }
-        Err(keyring_core::Error::NoEntry) => Ok(None),
-        Err(error) => Err(anyhow::anyhow!(error).context("read ChatGPT registration")),
-    }
-}
-
 fn save_registration(registration: &Registration) -> Result<()> {
     let store = crate::archive::encryption::platform_store()?;
     let entry = store.build(KEYRING_SERVICE, REGISTRATION_ACCOUNT, None)?;
@@ -673,6 +664,48 @@ async fn blocking<T: Send + 'static>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn disconnected_sign_in_starts_a_new_registration_without_account_hints() {
+        assert!(registration_for_sign_in(None).is_none());
+        let mut url = reqwest::Url::parse(AUTHORIZE).unwrap();
+        add_sign_in_hints(&mut url, None);
+        let pairs: Vec<_> = url.query_pairs().collect();
+        assert_eq!(pairs.len(), 1);
+        assert_eq!(pairs[0].0, "agent_name_hint");
+        assert_eq!(pairs[0].1, "ZapFast");
+    }
+
+    #[test]
+    fn connected_reauthorization_stays_bound_to_the_existing_identity() {
+        let credentials = Credentials {
+            client_id: "oaiapp_fixture".into(),
+            subject: "subject".into(),
+            email: Some("fixture@example.test".into()),
+            access_token: "access".into(),
+            refresh_token: "refresh".into(),
+            id_token: "identity".into(),
+            expires_at: 0,
+            scopes: vec![],
+        };
+        let registration = registration_for_sign_in(Some(&credentials)).unwrap();
+        assert_eq!(registration.client_id, credentials.client_id);
+        assert_eq!(registration.subject, credentials.subject);
+        let mut url = reqwest::Url::parse(AUTHORIZE).unwrap();
+        add_sign_in_hints(&mut url, Some(&credentials));
+        let pairs: Vec<_> = url.query_pairs().collect();
+        assert!(
+            pairs
+                .iter()
+                .any(|(key, value)| key == "login_hint" && value == "fixture@example.test")
+        );
+        assert!(
+            pairs
+                .iter()
+                .any(|(key, value)| key == "id_token_hint" && value == "identity")
+        );
+        assert!(!pairs.iter().any(|(key, _)| key == "agent_name_hint"));
+    }
 
     #[test]
     fn id_token_verifies_original_encoded_segments_and_rejects_tampering() {
