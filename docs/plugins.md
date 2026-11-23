@@ -49,7 +49,10 @@ otherwise generation reports that the selected model is unavailable. ZapFast
 accepts a result only after `response.completed`.
 
 Generated replies are proposals only. ZapFast never sends them automatically,
-and will not apply one over an existing draft, composer text, or attachments.
+and will not apply one over user-written or edited text, or attachments.
+An unchanged assistant proposal from the current session may be replaced by a
+newer proposal. After restarting, existing drafts are conservatively treated
+as user drafts and are not replaced.
 If the composer is open and empty, the proposal is placed there; otherwise it
 is saved as that chat's local draft. Uninstalling a native plugin removes its
 files, account settings, and per-chat permissions, but preserves messages and

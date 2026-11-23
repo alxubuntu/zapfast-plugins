@@ -3853,10 +3853,9 @@ impl App {
                         .iter()
                         .any(|known| known.id == chat && known.locked);
                 let open = live && self.open_chat.as_deref() == Some(chat.as_str());
-                let has_draft = self
-                    .drafts
-                    .get(&chat)
-                    .is_some_and(|draft| !draft.is_empty());
+                let previous = self.account().assistant_proposals.get(&chat).cloned();
+                let existing = self.drafts.get(&chat).filter(|draft| !draft.is_empty());
+                let has_draft = existing.is_some_and(|draft| Some(draft) != previous.as_ref());
                 let has_attachments = self
                     .attachment_drafts
                     .get(&chat)
@@ -3868,29 +3867,46 @@ impl App {
                     .is_some_and(|count| *count > 0);
                 let editing = open
                     && (self.plugin_input_pending
-                        || !self.composer.is_empty()
+                        || (!self.composer.is_empty()
+                            && Some(&self.composer) != previous.as_ref())
                         || !self.pending.is_empty()
                         || self.editing.is_some());
                 if eligible && !has_draft && !has_attachments && !busy && !editing {
                     if open {
-                        self.composer = text;
+                        self.composer = text.clone();
                         self.composer_mentions.clear();
+                        self.account_mut()
+                            .assistant_proposals
+                            .insert(chat.clone(), text);
                         self.store_draft(&chat, &self.composer);
                     } else {
-                        self.backend
-                            .send(Command::SaveAssistantDraft { chat, text });
+                        self.backend.send(Command::SaveAssistantDraft {
+                            chat,
+                            text,
+                            previous,
+                        });
                     }
                 }
             }
-            Event::AssistantDraftStored { chat, text } => {
+            Event::AssistantDraftStored {
+                chat,
+                text,
+                previous,
+            } => {
                 if live
                     && self.open_chat.as_deref() != Some(chat.as_str())
-                    && !self.drafts.contains_key(&chat)
+                    && self
+                        .drafts
+                        .get(&chat)
+                        .is_none_or(|draft| Some(draft) == previous.as_ref())
                     && !self
                         .attachment_drafts
                         .get(&chat)
                         .is_some_and(|draft| !draft.pending.is_empty())
                 {
+                    self.account_mut()
+                        .assistant_proposals
+                        .insert(chat.clone(), text.clone());
                     self.drafts.insert(chat, text);
                 }
             }
@@ -8020,6 +8036,7 @@ impl App {
             }
             Action::Composing { chat, composing } => {
                 if composing {
+                    self.account_mut().assistant_proposals.remove(&chat);
                     self.note_keystroke();
                 } else {
                     self.stop_composing(&chat);
@@ -14957,6 +14974,41 @@ mod tests {
         app.accounts.push(second);
         app.active = 0;
         (app, commands)
+    }
+
+    #[test]
+    fn assistant_replaces_its_own_open_draft_but_not_user_edits() {
+        let directory = tempfile::tempdir().unwrap();
+        let (mut app, _commands) = two_accounts(directory.path());
+        let chat = "123@s.whatsapp.net".to_owned();
+        app.settings.assistant_enabled = true;
+        app.chatgpt_email = Some("fixture@example.test".into());
+        app.open_chat = Some(chat.clone());
+        app.apply_backend_event(
+            Event::AssistantDraftReady {
+                chat: chat.clone(),
+                text: "first".into(),
+            },
+            true,
+        );
+        assert_eq!(app.composer, "first");
+        app.apply_backend_event(
+            Event::AssistantDraftReady {
+                chat: chat.clone(),
+                text: "second".into(),
+            },
+            true,
+        );
+        assert_eq!(app.composer, "second");
+        app.composer = "my changes".into();
+        app.apply_backend_event(
+            Event::AssistantDraftReady {
+                chat,
+                text: "must not replace".into(),
+            },
+            true,
+        );
+        assert_eq!(app.composer, "my changes");
     }
 
     #[test]

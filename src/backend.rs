@@ -176,6 +176,7 @@ pub enum Command {
     SaveAssistantDraft {
         chat: ChatId,
         text: String,
+        previous: Option<String>,
     },
     RunPlugin {
         id: String,
@@ -1237,6 +1238,7 @@ pub enum Event {
     AssistantDraftStored {
         chat: ChatId,
         text: String,
+        previous: Option<String>,
     },
     PluginDraftRequested {
         plugin: String,

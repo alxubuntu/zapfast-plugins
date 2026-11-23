@@ -6215,7 +6215,7 @@ impl Worker {
             log::warn!("could not store a message: {error}");
             return;
         }
-        if plugin_new {
+        let plugin_text = if plugin_new {
             let plugin_text = match &message.content {
                 Content::Text { text, .. } | Content::Interactive { text, .. } => {
                     Some(text.clone())
@@ -6225,17 +6225,12 @@ impl Worker {
                 | Content::Document { caption, .. } => caption.clone(),
                 _ => None,
             };
-            if let Some(text) = plugin_text
+            plugin_text
                 .filter(|text| !text.trim().is_empty())
                 .map(|text| text.chars().take(16 * 1024).collect::<String>())
-            {
-                self.emit(Event::PluginMessageReceived {
-                    chat: chat.clone(),
-                    message: message.id.clone(),
-                    text,
-                });
-            }
-        }
+        } else {
+            None
+        };
         // Only a stored message can be moved to the server's time.
         if message.from_me && message.status == Delivery::Pending {
             self.awaiting_ack.insert(
@@ -6302,6 +6297,7 @@ impl Worker {
         self.polish(&mut stored);
         // Notify only for live incoming messages, not history replay.
         let incoming = (unread && !self.syncing).then(|| stored.clone());
+        let message_id = stored.id.clone();
         self.emit(Event::Messages {
             chat: chat.clone(),
             messages: vec![stored],
@@ -6315,6 +6311,14 @@ impl Worker {
             self.prefetch.touch();
         }
         self.emit_chat(&chat);
+        // The window's eligibility check needs the updated unread count.
+        if let Some(text) = plugin_text {
+            self.emit(Event::PluginMessageReceived {
+                chat: chat.clone(),
+                message: message_id,
+                text,
+            });
+        }
         if let Some(message) = incoming {
             self.emit(Event::Incoming {
                 chat,
@@ -7540,7 +7544,11 @@ impl Worker {
                     cancel.send_replace(*generation);
                 }
             }
-            Command::SaveAssistantDraft { chat, text } => {
+            Command::SaveAssistantDraft {
+                chat,
+                text,
+                previous,
+            } => {
                 if crate::model::ChatKind::from_id(&chat) == crate::model::ChatKind::Direct
                     && self
                         .archive
@@ -7550,10 +7558,19 @@ impl Worker {
                         .is_some_and(|record| !record.locked)
                     && self
                         .archive
-                        .set_draft_if_empty(&chat, &text, jiff::Timestamp::now().as_second())
+                        .set_assistant_draft(
+                            &chat,
+                            &text,
+                            jiff::Timestamp::now().as_second(),
+                            previous.as_deref(),
+                        )
                         .unwrap_or(false)
                 {
-                    self.emit(Event::AssistantDraftStored { chat, text });
+                    self.emit(Event::AssistantDraftStored {
+                        chat,
+                        text,
+                        previous,
+                    });
                 }
             }
             Command::ChatGptSignIn => {
@@ -23397,6 +23414,20 @@ mod receipt_tests {
             })
             .collect();
         assert_eq!(messages, vec![(PEER.to_owned(), "live".to_owned())]);
+    }
+
+    #[test]
+    fn incoming_plugin_event_follows_updated_unread_chat() {
+        let (mut worker, events, _inbox, _wa) = worker();
+        worker.archive_message(incoming("live", 100), None, None, false, true);
+        let events: Vec<_> = events.try_iter().collect();
+        let chat = events.iter().position(
+            |event| matches!(event, Event::ChatUpdated(chat) if chat.id == PEER && chat.unread > 0),
+        );
+        let plugin = events
+            .iter()
+            .position(|event| matches!(event, Event::PluginMessageReceived { .. }));
+        assert!(chat.is_some_and(|chat| plugin.is_some_and(|plugin| chat < plugin)));
     }
 
     #[test]

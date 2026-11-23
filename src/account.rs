@@ -48,6 +48,8 @@ pub struct Account {
     pub(crate) prefetch_sent: Option<(bool, Option<ChatId>)>,
     pub scroll_chat_into_view: Option<ChatId>,
     pub drafts: HashMap<ChatId, String>,
+    /// Unedited assistant proposals made during this session.
+    pub(crate) assistant_proposals: HashMap<ChatId, String>,
     /// Whether the open chat had a draft when opened. Keep its list priority
     /// stable while the reader types, clears, or sends that draft.
     pub(crate) open_draft_priority: bool,
@@ -207,6 +209,7 @@ impl Account {
             prefetch_sent: None,
             scroll_chat_into_view: None,
             drafts: HashMap::new(),
+            assistant_proposals: HashMap::new(),
             open_draft_priority: false,
             storage_stats: None,
             storage_token: 0,
