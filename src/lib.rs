@@ -20,6 +20,7 @@ pub mod call_diag;
 pub mod call_tones;
 pub mod calls;
 pub mod camera;
+pub mod chatgpt;
 #[cfg(target_os = "linux")]
 pub mod clipboard;
 #[cfg(any(test, feature = "demo"))]

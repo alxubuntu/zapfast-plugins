@@ -450,6 +450,8 @@ fn composer_link(text: &str) -> Option<String> {
 pub struct App {
     pub dirs: AppDirs,
     pub settings: Settings,
+    pub chatgpt_email: Option<String>,
+    pub chatgpt_busy: bool,
     /// Writes settings and the account roster on a thread of its own, so
     /// a save never stalls the window; flushed at exit and before a suspend.
     pub files: fastframe_file::Writer,
@@ -1569,6 +1571,8 @@ impl App {
         let mut app = Self {
             dirs,
             settings,
+            chatgpt_email: None,
+            chatgpt_busy: false,
             locale,
             settings_dirty: false,
             last_settings_save: Instant::now(),
@@ -1822,6 +1826,9 @@ impl App {
         app.settings.voice_speed = app.player.set_speed(app.settings.voice_speed);
         // The chip comes back with its account; a label is the window's.
         app.label_filter = app.remembered_label();
+        if !cfg!(any(test, feature = "demo")) {
+            app.backend.send(Command::ChatGptLoadStatus);
+        }
         app
     }
 
@@ -3735,6 +3742,27 @@ impl App {
                 message,
                 text,
             } => {
+                let assistant_eligible = self.settings.assistant_enabled
+                    && self.chatgpt_email.is_some()
+                    && crate::model::ChatKind::from_id(&chat) == crate::model::ChatKind::Direct
+                    && !self.blocklist.contains(&chat)
+                    && !self
+                        .account()
+                        .settings
+                        .assistant_disabled_chats
+                        .iter()
+                        .any(|id| id == &chat)
+                    && self.account().chats.iter().any(|known| {
+                        known.id == chat
+                            && (known.unread > 0 || known.marked_unread)
+                            && !known.locked
+                    });
+                if assistant_eligible {
+                    self.backend.send(Command::AssistantIncoming {
+                        chat: chat.clone(),
+                        message: message.clone(),
+                    });
+                }
                 let generation = self.account().plugin_generation;
                 for plugin in &self.account().settings.enabled_plugins {
                     if !self
@@ -3784,6 +3812,88 @@ impl App {
                     }
                 }
             },
+            Event::ChatGptStatus {
+                email,
+                error,
+                revocation_confirmed,
+            } => {
+                self.chatgpt_busy = false;
+                if let Some(error) = error {
+                    self.toast_error(format!("ChatGPT connection failed: {error}"));
+                } else {
+                    self.chatgpt_email = email;
+                    if self.chatgpt_email.is_none() && !revocation_confirmed {
+                        self.toast(
+                            "Signed out locally; ChatGPT could not confirm remote revocation.",
+                        );
+                    } else if self.chatgpt_email.is_none() {
+                        self.toast("Disconnected from ChatGPT.");
+                    } else {
+                        self.toast("Connected to ChatGPT.");
+                    }
+                }
+            }
+            Event::ChatGptConnectionLoaded(email) => {
+                self.chatgpt_email = email;
+            }
+            Event::AssistantDraftReady { chat, text } => {
+                let eligible = self.settings.assistant_enabled
+                    && self.chatgpt_email.is_some()
+                    && crate::model::ChatKind::from_id(&chat) == crate::model::ChatKind::Direct
+                    && !self.blocklist.contains(&chat)
+                    && !self
+                        .account()
+                        .settings
+                        .assistant_disabled_chats
+                        .iter()
+                        .any(|id| id == &chat)
+                    && !self
+                        .account()
+                        .chats
+                        .iter()
+                        .any(|known| known.id == chat && known.locked);
+                let open = live && self.open_chat.as_deref() == Some(chat.as_str());
+                let has_draft = self
+                    .drafts
+                    .get(&chat)
+                    .is_some_and(|draft| !draft.is_empty());
+                let has_attachments = self
+                    .attachment_drafts
+                    .get(&chat)
+                    .is_some_and(|draft| !draft.pending.is_empty());
+                let busy = self
+                    .account()
+                    .plugin_pickers
+                    .get(&chat)
+                    .is_some_and(|count| *count > 0);
+                let editing = open
+                    && (self.plugin_input_pending
+                        || !self.composer.is_empty()
+                        || !self.pending.is_empty()
+                        || self.editing.is_some());
+                if eligible && !has_draft && !has_attachments && !busy && !editing {
+                    if open {
+                        self.composer = text;
+                        self.composer_mentions.clear();
+                        self.store_draft(&chat, &self.composer);
+                    } else {
+                        self.backend
+                            .send(Command::SaveAssistantDraft { chat, text });
+                    }
+                }
+            }
+            Event::AssistantDraftStored { chat, text } => {
+                if live
+                    && self.open_chat.as_deref() != Some(chat.as_str())
+                    && !self.drafts.contains_key(&chat)
+                    && !self
+                        .attachment_drafts
+                        .get(&chat)
+                        .is_some_and(|draft| !draft.pending.is_empty())
+                {
+                    self.drafts.insert(chat, text);
+                }
+            }
             Event::PluginDraftRequested {
                 plugin,
                 chat,
@@ -9564,6 +9674,90 @@ impl App {
                 self.focus_settings_search = true;
             }
             Action::InstallPlugin => self.backend.send(Command::PickPlugin),
+            Action::ChatGptSignIn => {
+                if !self.chatgpt_busy {
+                    self.chatgpt_busy = true;
+                    self.backend.send(Command::ChatGptSignIn);
+                }
+            }
+            Action::ChatGptSignOut => {
+                if !self.chatgpt_busy {
+                    self.chatgpt_busy = true;
+                    for account in &self.accounts {
+                        account
+                            .backend
+                            .send(Command::CancelAssistant { chat: None });
+                    }
+                    self.backend.send(Command::ChatGptSignOut);
+                }
+            }
+            Action::SetAssistantEnabled(enabled) => {
+                if self.settings.assistant_enabled != enabled {
+                    self.settings.assistant_enabled = enabled;
+                    self.settings_dirty = true;
+                    for account in &self.accounts {
+                        account
+                            .backend
+                            .send(Command::CancelAssistant { chat: None });
+                    }
+                    if enabled && self.chatgpt_email.is_none() {
+                        self.toast_error(
+                            "Connect a ChatGPT account before enabling the assistant.",
+                        );
+                        self.settings.assistant_enabled = false;
+                        self.settings_dirty = true;
+                    }
+                }
+            }
+            Action::SetAssistantChat { chat, enabled } => {
+                if crate::model::ChatKind::from_id(&chat) == crate::model::ChatKind::Direct {
+                    let account = self.account_mut();
+                    account
+                        .settings
+                        .assistant_disabled_chats
+                        .retain(|existing| existing != &chat);
+                    if !enabled {
+                        account.settings.assistant_disabled_chats.push(chat.clone());
+                    }
+                    account.mark_settings_dirty();
+                    if !enabled {
+                        account
+                            .backend
+                            .send(Command::CancelAssistant { chat: Some(chat) });
+                    }
+                }
+            }
+            Action::AskUninstallPlugin(id) => {
+                if self.account().plugins.iter().any(|plugin| plugin.id == id) {
+                    self.dialog = Some(Dialog::ConfirmUninstallPlugin(id));
+                }
+            }
+            Action::UninstallPlugin(id) => {
+                if self.account().plugins.iter().any(|plugin| plugin.id == id) {
+                    let root = self.account().dirs.plugins_dir();
+                    for account in &mut self.accounts {
+                        account.plugin_generation = account.plugin_generation.wrapping_add(1);
+                        account
+                            .plugin_cancel
+                            .send_replace(account.plugin_generation);
+                    }
+                    match zapfast_plugin_host_core::uninstall(&root, &id) {
+                        Ok(()) => {
+                            for account in &mut self.accounts {
+                                account.plugins.retain(|plugin| plugin.id != id);
+                                account
+                                    .settings
+                                    .enabled_plugins
+                                    .retain(|plugin| plugin != &id);
+                                account.settings.plugin_chats.remove(&id);
+                                account.mark_settings_dirty();
+                            }
+                            self.toast("Plugin uninstalled; its settings and chat permissions were removed.");
+                        }
+                        Err(_) => self.toast("Could not uninstall plugin."),
+                    }
+                }
+            }
             Action::EnablePlugin { id, enabled } => {
                 if self.account().plugins.iter().any(|plugin| plugin.id == id) {
                     let account = self.account_mut();

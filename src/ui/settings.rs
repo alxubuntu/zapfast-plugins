@@ -816,14 +816,67 @@ fn sections(app: &App) -> Vec<Section> {
             }
         },
     );
+    let chatgpt_connected = app.chatgpt_email.is_some();
+    let chatgpt_label = app
+        .chatgpt_email
+        .clone()
+        .unwrap_or_else(|| "Not connected".into());
+    plugins.row("ChatGPT account", chatgpt_label, move |ui, app| {
+        if theme::soft_button(
+            ui,
+            &palette,
+            None,
+            if app.chatgpt_busy {
+                "Working…"
+            } else if chatgpt_connected {
+                "Disconnect"
+            } else {
+                "Continue with ChatGPT"
+            },
+            app.chatgpt_busy,
+        )
+        .clicked()
+        {
+            app.actions.push(if chatgpt_connected {
+                Action::ChatGptSignOut
+            } else {
+                Action::ChatGptSignIn
+            });
+        }
+    });
+    let assistant_enabled = app.settings.assistant_enabled;
+    plugins.row(
+        "OpenAI assistant",
+        "Uses unread direct chats by default. Message text and recent local history are sent to OpenAI to draft replies.",
+        move |ui, app| {
+            if theme::soft_button(
+                ui,
+                &palette,
+                None,
+                if assistant_enabled { "Disable" } else { "Enable…"},
+                false,
+            )
+            .clicked()
+            {
+                if assistant_enabled {
+                    app.actions.push(Action::SetAssistantEnabled(false));
+                } else {
+                    app.actions.push(Action::ShowDialog(
+                        crate::model::Dialog::ConfirmEnableAssistant,
+                    ));
+                }
+            }
+        },
+    );
     for plugin in &app.account().plugins {
         let id = plugin.id.clone();
         let enabled = app.account().settings.enabled_plugins.contains(&id);
         plugins.row(
             id.clone(),
             format!(
-                "Version {} · account enabled; choose chats in More",
-                plugin.version
+                "Version {} · {} for this account; choose chats in More",
+                plugin.version,
+                if enabled { "enabled" } else { "disabled" }
             ),
             move |ui, app| {
                 if theme::soft_button(
@@ -836,9 +889,12 @@ fn sections(app: &App) -> Vec<Section> {
                 .clicked()
                 {
                     app.actions.push(Action::EnablePlugin {
-                        id,
+                        id: id.clone(),
                         enabled: !enabled,
                     });
+                }
+                if theme::soft_button(ui, &palette, None, "Uninstall…", false).clicked() {
+                    app.actions.push(Action::AskUninstallPlugin(id));
                 }
             },
         );

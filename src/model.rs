@@ -2478,6 +2478,8 @@ pub enum Dialog {
     About,
     ConfirmUnlink,
     ConfirmRemoveAccount(AccountId),
+    ConfirmUninstallPlugin(String),
+    ConfirmEnableAssistant,
     /// Confirms emptying one account's media cache.
     ConfirmClearMediaCache(AccountId),
     /// Phone number used for pairing-code linking.
@@ -2709,6 +2711,15 @@ pub fn forward_limit(frequently_forwarded: bool) -> usize {
 #[derive(Clone, Debug, PartialEq)]
 pub enum Action {
     InstallPlugin,
+    ChatGptSignIn,
+    ChatGptSignOut,
+    SetAssistantEnabled(bool),
+    SetAssistantChat {
+        chat: ChatId,
+        enabled: bool,
+    },
+    AskUninstallPlugin(String),
+    UninstallPlugin(String),
     EnablePlugin {
         id: String,
         enabled: bool,

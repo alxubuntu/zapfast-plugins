@@ -38,6 +38,18 @@ impl Archive {
         Ok(())
     }
 
+    /// Stores a generated proposal only when the chat has no draft already.
+    /// Returns whether the insert succeeded.
+    pub fn set_draft_if_empty(&self, chat: &str, text: &str, at: i64) -> Result<bool> {
+        if text.trim().is_empty() {
+            return Ok(false);
+        }
+        Ok(self.connection.execute(
+            "INSERT OR IGNORE INTO drafts (chat, text, updated_at) VALUES (?1, ?2, ?3)",
+            params![chat, text, at],
+        )? == 1)
+    }
+
     /// Drops the draft for a chat, for example once its text is sent.
     pub fn clear_draft(&self, chat: &str) -> Result<()> {
         self.connection
@@ -90,5 +102,20 @@ mod tests {
         archive.set_draft("2@s.whatsapp.net", "again", 14).unwrap();
         archive.clear_chat("2@s.whatsapp.net").unwrap();
         assert!(archive.drafts().unwrap().is_empty());
+    }
+
+    #[test]
+    fn assistant_draft_never_replaces_an_existing_draft() {
+        let archive = Archive::in_memory().unwrap();
+        assert!(archive.set_draft_if_empty("chat", "proposal", 1).unwrap());
+        assert!(
+            !archive
+                .set_draft_if_empty("chat", "replacement", 2)
+                .unwrap()
+        );
+        assert_eq!(
+            archive.drafts().unwrap(),
+            [("chat".into(), "proposal".into())]
+        );
     }
 }

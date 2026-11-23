@@ -1,5 +1,6 @@
 //! Package validation for the ZapFast plugin host.
 
+pub mod batching;
 pub mod runtime;
 
 use std::collections::{BTreeMap, HashSet};
@@ -214,6 +215,24 @@ pub fn executable(root: &Path, manifest: &Manifest, platform: &str) -> Option<Pa
     Some(root.join(&manifest.id).join(path))
 }
 
+/// Remove an installed plugin directory. The ID is validated and a symlink
+/// destination is rejected so uninstall cannot escape the plugin root.
+pub fn uninstall(root: &Path, id: &str) -> Result<()> {
+    ensure!(valid_id(id), "invalid plugin ID");
+    let root_meta = fs::symlink_metadata(root).context("plugin directory unavailable")?;
+    ensure!(
+        root_meta.file_type().is_dir() && !root_meta.file_type().is_symlink(),
+        "invalid plugin directory"
+    );
+    let destination = root.join(id);
+    let metadata = fs::symlink_metadata(&destination)?;
+    ensure!(
+        metadata.file_type().is_dir() && !metadata.file_type().is_symlink(),
+        "plugin install is not a directory"
+    );
+    fs::remove_dir_all(destination).context("remove plugin files")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -251,6 +270,17 @@ mod tests {
             b"test"
         );
         assert!(install(&archive, &root, "linux-x86_64").is_err());
+    }
+
+    #[test]
+    fn uninstall_removes_plugin_files_and_rejects_invalid_ids() {
+        let dir = tempfile::tempdir().unwrap();
+        let archive = package(dir.path(), MANIFEST, &[("bin/plugin", b"test")]);
+        let root = dir.path().join("installed");
+        install(&archive, &root, "linux-x86_64").unwrap();
+        uninstall(&root, "org.example.plugin").unwrap();
+        assert!(!root.join("org.example.plugin").exists());
+        assert!(uninstall(&root, "../outside").is_err());
     }
 
     #[test]

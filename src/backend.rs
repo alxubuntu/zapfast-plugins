@@ -163,6 +163,20 @@ pub struct SendTurn {
 #[derive(Debug)]
 pub enum Command {
     PickPlugin,
+    ChatGptSignIn,
+    ChatGptSignOut,
+    ChatGptLoadStatus,
+    AssistantIncoming {
+        chat: ChatId,
+        message: String,
+    },
+    CancelAssistant {
+        chat: Option<ChatId>,
+    },
+    SaveAssistantDraft {
+        chat: ChatId,
+        text: String,
+    },
     RunPlugin {
         id: String,
         chat: ChatId,
@@ -1210,6 +1224,20 @@ pub enum Command {
 #[derive(Debug)]
 pub enum Event {
     PluginInstalled(Result<zapfast_plugin_host_core::Manifest, String>),
+    ChatGptStatus {
+        email: Option<String>,
+        error: Option<String>,
+        revocation_confirmed: bool,
+    },
+    ChatGptConnectionLoaded(Option<String>),
+    AssistantDraftReady {
+        chat: ChatId,
+        text: String,
+    },
+    AssistantDraftStored {
+        chat: ChatId,
+        text: String,
+    },
     PluginDraftRequested {
         plugin: String,
         chat: ChatId,

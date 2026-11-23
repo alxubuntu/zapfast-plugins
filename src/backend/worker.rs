@@ -801,6 +801,28 @@ fn device_name() -> String {
     }
 }
 
+fn assistant_message_text(content: &Content) -> Option<String> {
+    let text = match content {
+        Content::Text { text, .. } | Content::Interactive { text, .. } => text.clone(),
+        Content::Image { caption, .. }
+        | Content::Video { caption, .. }
+        | Content::Document { caption, .. } => caption.clone()?,
+        _ => return None,
+    };
+    let text = text.trim();
+    (!text.is_empty()).then(|| text.chars().take(8_000).collect())
+}
+
+fn truncate_utf8(text: &mut String, max_bytes: usize) {
+    if text.len() > max_bytes {
+        let mut boundary = max_bytes;
+        while !text.is_char_boundary(boundary) {
+            boundary -= 1;
+        }
+        text.truncate(boundary);
+    }
+}
+
 /// App version in WhatsApp device-property format.
 fn app_version() -> wa::device_props::AppVersion {
     let mut parts = env!("CARGO_PKG_VERSION")
@@ -984,6 +1006,9 @@ pub async fn run(
                 .set_meta(star_recovery::STARS_RECOVERED, "complete")
                 .is_ok());
     let mut worker = Worker {
+        assistant_batches: Default::default(),
+        assistant_cancel: HashMap::new(),
+        assistant_generation: HashMap::new(),
         privacy_ready: privacy_confirmed,
         privacy_confirmed,
         privacy_snapshot,
@@ -1123,6 +1148,7 @@ pub async fn run(
     let mut tick = tokio::time::interval(link_watch::CHECK_INTERVAL);
     'commands: loop {
         let deadline = worker.sync_deadline;
+        let assistant_deadline = worker.assistant_batches.next_deadline();
         // Cloned before the select so its branches never borrow the worker: a live call is the only
         // thing that gives either of these a receiver.
         let mut call_events = worker.call.as_ref().map(|runtime| runtime.events.clone());
@@ -1202,6 +1228,12 @@ pub async fn run(
                 worker.set_syncing(false);
                 worker.emit_chats();
             }
+            _ = async {
+                match assistant_deadline {
+                    Some(deadline) => tokio::time::sleep_until(tokio::time::Instant::from_std(deadline)).await,
+                    None => std::future::pending::<()>().await,
+                }
+            } => worker.pump_assistant_batches(),
             _ = tick.tick() => {
                 worker.watch_link();
                 worker.reveal_unconfirmed_after_grace();
@@ -1229,6 +1261,109 @@ pub async fn run(
 }
 
 impl Worker {
+    fn pump_assistant_batches(&mut self) {
+        for batch in self.assistant_batches.take_due(Instant::now()) {
+            if crate::model::ChatKind::from_id(&batch.chat) != crate::model::ChatKind::Direct {
+                continue;
+            }
+            let Ok(Some(chat)) = self.archive.chat(&batch.chat) else {
+                continue;
+            };
+            if chat.locked {
+                continue;
+            }
+            let Some(latest) = batch
+                .messages
+                .iter()
+                .filter_map(|id| self.archive.message(&batch.chat, id).ok().flatten())
+                .filter(|message| !message.from_me)
+                .max_by_key(|message| message.timestamp)
+            else {
+                continue;
+            };
+            let history = self
+                .archive
+                .messages_range(
+                    &batch.chat,
+                    latest.timestamp.saturating_sub(7 * 24 * 60 * 60),
+                    (latest.timestamp, latest.id.as_str()),
+                    32,
+                )
+                .unwrap_or_default();
+            let mut prompt = String::from(
+                "Conversation context, which may be incomplete. Draft a reply to the new messages below.\n",
+            );
+            for message in history {
+                if let Some(text) = assistant_message_text(&message.content) {
+                    prompt.push_str(if message.from_me {
+                        "You: "
+                    } else {
+                        "Contact: "
+                    });
+                    prompt.push_str(&text);
+                    prompt.push('\n');
+                }
+            }
+            let mut incoming = Vec::new();
+            for id in &batch.messages {
+                if let Ok(Some(message)) = self.archive.message(&batch.chat, id)
+                    && !message.from_me
+                    && let Some(text) = assistant_message_text(&message.content)
+                {
+                    incoming.push(text);
+                }
+            }
+            if incoming.is_empty() {
+                continue;
+            }
+            prompt.push_str("\nNew messages:\n");
+            for text in incoming {
+                prompt.push_str("Contact: ");
+                prompt.push_str(&text);
+                prompt.push('\n');
+            }
+            truncate_utf8(&mut prompt, 32 * 1024);
+            let generation = self
+                .assistant_generation
+                .entry(batch.chat.clone())
+                .and_modify(|generation| *generation = generation.wrapping_add(1))
+                .or_insert(1);
+            let generation = *generation;
+            let mut cancel = self
+                .assistant_cancel
+                .entry(batch.chat.clone())
+                .or_insert_with(|| tokio::sync::watch::channel(generation).0)
+                .subscribe();
+            let events = self.events.clone();
+            let waker = self.waker.clone();
+            let chat = batch.chat;
+            tokio::spawn(async move {
+                let result = tokio::select! {
+                    changed = cancel.changed() => {
+                        let _ = changed;
+                        return;
+                    }
+                    result = crate::chatgpt::draft(&prompt, None) => result,
+                };
+                if cancel.has_changed().unwrap_or(true) {
+                    return;
+                }
+                match result {
+                    Ok(text) => {
+                        let _ = events.send(Event::AssistantDraftReady { chat, text });
+                        waker.wake();
+                    }
+                    Err(_) => {
+                        let _ = events.send(Event::Error(
+                            "Could not generate an OpenAI draft. Check the connection, model access, or usage limits.".into(),
+                        ));
+                        waker.wake();
+                    }
+                }
+            });
+        }
+    }
+
     /// Handles `first` and the events already waiting behind it, up to
     /// `EVENT_BATCH` or `EVENT_BATCH_TIME`, with their archive writes
     /// committed together. A first sync brings thousands of deletions and
@@ -1488,6 +1623,9 @@ enum AwaitingAck {
 }
 
 struct Worker {
+    assistant_batches: zapfast_plugin_host_core::batching::Pending,
+    assistant_cancel: HashMap<ChatId, tokio::sync::watch::Sender<u64>>,
+    assistant_generation: HashMap<ChatId, u64>,
     /// Private content may reach the UI.
     privacy_ready: bool,
     /// Phone lock state is known to be mirrored in the archive.
@@ -7355,6 +7493,115 @@ impl Worker {
             return;
         }
         match command {
+            Command::AssistantIncoming { chat, message } => {
+                if crate::model::ChatKind::from_id(&chat) == crate::model::ChatKind::Direct
+                    && self
+                        .archive
+                        .chat(&chat)
+                        .ok()
+                        .flatten()
+                        .is_some_and(|record| !record.locked)
+                {
+                    let generation = self
+                        .assistant_generation
+                        .entry(chat.clone())
+                        .and_modify(|generation| *generation = generation.wrapping_add(1))
+                        .or_insert(1);
+                    if let Some(cancel) = self.assistant_cancel.get(&chat) {
+                        cancel.send_replace(*generation);
+                    }
+                    self.assistant_batches.push(
+                        &chat,
+                        &message,
+                        Instant::now(),
+                        std::time::Duration::from_secs(30),
+                    );
+                }
+            }
+            Command::CancelAssistant { chat: Some(chat) } => {
+                self.assistant_batches.cancel(&chat);
+                let generation = self
+                    .assistant_generation
+                    .entry(chat.clone())
+                    .and_modify(|generation| *generation = generation.wrapping_add(1))
+                    .or_insert(1);
+                if let Some(cancel) = self.assistant_cancel.get(&chat) {
+                    cancel.send_replace(*generation);
+                }
+            }
+            Command::CancelAssistant { chat: None } => {
+                self.assistant_batches.clear();
+                for (chat, cancel) in &self.assistant_cancel {
+                    let generation = self
+                        .assistant_generation
+                        .entry(chat.clone())
+                        .and_modify(|generation| *generation = generation.wrapping_add(1))
+                        .or_insert(1);
+                    cancel.send_replace(*generation);
+                }
+            }
+            Command::SaveAssistantDraft { chat, text } => {
+                if crate::model::ChatKind::from_id(&chat) == crate::model::ChatKind::Direct
+                    && self
+                        .archive
+                        .chat(&chat)
+                        .ok()
+                        .flatten()
+                        .is_some_and(|record| !record.locked)
+                    && self
+                        .archive
+                        .set_draft_if_empty(&chat, &text, jiff::Timestamp::now().as_second())
+                        .unwrap_or(false)
+                {
+                    self.emit(Event::AssistantDraftStored { chat, text });
+                }
+            }
+            Command::ChatGptSignIn => {
+                let events = self.events.clone();
+                let waker = self.waker.clone();
+                tokio::spawn(async move {
+                    let result = crate::chatgpt::sign_in().await;
+                    let (email, error) = match result {
+                        Ok(credentials) => (credentials.email().map(str::to_owned), None),
+                        Err(error) => (None, Some(error.to_string())),
+                    };
+                    let _ = events.send(Event::ChatGptStatus {
+                        email,
+                        error,
+                        revocation_confirmed: true,
+                    });
+                    waker.wake();
+                });
+            }
+            Command::ChatGptSignOut => {
+                let events = self.events.clone();
+                let waker = self.waker.clone();
+                tokio::spawn(async move {
+                    let result = crate::chatgpt::sign_out().await;
+                    let (email, error, revocation_confirmed) = match result {
+                        Ok(revoked) => (None, None, revoked),
+                        Err(error) => (None, Some(error.to_string()), false),
+                    };
+                    let _ = events.send(Event::ChatGptStatus {
+                        email,
+                        error,
+                        revocation_confirmed,
+                    });
+                    waker.wake();
+                });
+            }
+            Command::ChatGptLoadStatus => {
+                let events = self.events.clone();
+                let waker = self.waker.clone();
+                tokio::task::spawn_blocking(move || {
+                    let email = crate::chatgpt::connection()
+                        .ok()
+                        .flatten()
+                        .and_then(|credentials| credentials.email().map(str::to_owned));
+                    let _ = events.send(Event::ChatGptConnectionLoaded(email));
+                    waker.wake();
+                });
+            }
             Command::PickPlugin => {
                 let events = self.events.clone();
                 let waker = self.waker.clone();
@@ -15024,6 +15271,14 @@ mod tests {
     use super::*;
     use std::io::Cursor;
 
+    #[test]
+    fn assistant_prompt_truncation_keeps_utf8_valid() {
+        let mut text = format!("{}€", "a".repeat(9));
+        truncate_utf8(&mut text, 10);
+        assert_eq!(text, "aaaaaaaaa");
+        assert!(text.is_char_boundary(text.len()));
+    }
+
     #[tokio::test]
     async fn a_lost_socket_without_a_disconnect_event_starts_reconnecting() {
         let (mut worker, events, _commands, _wa) = super::receipt_tests::worker();
@@ -20545,6 +20800,9 @@ mod receipt_tests {
         let root =
             std::env::temp_dir().join(format!("zapfast-worker-test-{}-{n}", std::process::id()));
         let worker = Worker {
+            assistant_batches: Default::default(),
+            assistant_cancel: HashMap::new(),
+            assistant_generation: HashMap::new(),
             privacy_ready: true,
             privacy_confirmed: true,
             privacy_snapshot: false,

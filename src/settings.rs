@@ -407,6 +407,9 @@ pub enum NotificationSound {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Settings {
+    /// OpenAI assistant master switch. Off until the privacy notice is
+    /// explicitly accepted; when on it considers unread direct chats by default.
+    pub assistant_enabled: bool,
     /// [`SETTINGS_VERSION`] when written; missing, and so 0, in older files.
     #[serde(default)]
     pub version: u32,
@@ -554,6 +557,7 @@ impl Default for Settings {
     fn default() -> Self {
         Self {
             version: SETTINGS_VERSION,
+            assistant_enabled: false,
             theme: ThemeChoice::System,
             messages_theme: false,
             font: FontChoice::System,
@@ -828,6 +832,9 @@ pub struct AccountSettings {
     /// Chat IDs opted into each plugin, keyed by plugin ID.
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub plugin_chats: std::collections::BTreeMap<String, Vec<String>>,
+    /// Direct chats excluded from the OpenAI assistant for this account.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub assistant_disabled_chats: Vec<String>,
     pub send_read_receipts: bool,
     pub send_typing: bool,
     #[serde(alias = "auto_download_images")]
@@ -856,6 +863,7 @@ impl Default for AccountSettings {
         Self {
             enabled_plugins: Vec::new(),
             plugin_chats: std::collections::BTreeMap::new(),
+            assistant_disabled_chats: Vec::new(),
             send_read_receipts: true,
             send_typing: true,
             auto_download: true,
@@ -876,6 +884,7 @@ impl AccountSettings {
         Self {
             enabled_plugins: Vec::new(),
             plugin_chats: std::collections::BTreeMap::new(),
+            assistant_disabled_chats: Vec::new(),
             send_read_receipts: settings.send_read_receipts,
             send_typing: settings.send_typing,
             auto_download: settings.auto_download,

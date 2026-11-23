@@ -16,6 +16,42 @@ textual history messages from the previous seven days. Locked chats are not
 eligible. Installation does not require rebuilding ZapFast.
 Unlinking an account clears its plugin enablement and cancels in-flight work.
 
+## OpenAI assistant
+
+The OpenAI assistant is separate from installed plugins. Connect a ChatGPT
+account in **Settings → Plugins** using the official Sign in with ChatGPT
+browser flow. ZapFast uses OAuth with PKCE, validates the returned ID token,
+and stores tokens in the operating system keyring. Disconnect attempts to
+revoke the refresh token and always removes the local credential; the UI
+reports when remote revocation could not be confirmed.
+
+The assistant is off until you explicitly enable it after the privacy notice.
+Once enabled, it considers new messages in unread, unlocked, one-to-one chats
+by default. Use **More → Disable OpenAI assistant** in a chat to exclude it,
+or re-enable it from the same menu. Groups and locked chats are always
+excluded. Messages are grouped until 30 seconds after the latest message.
+Reading the chat during that wait does not cancel generation; disabling the
+assistant globally or for that chat does.
+
+To draft a reply, ZapFast sends OpenAI the textual contents of up to 32 local
+messages from the previous seven days and the new incoming text. Text captions
+on images, videos, and documents may be included; media files, phone numbers
+as separate metadata, contacts, and other chats are not included. This context
+can contain personal information. OpenAI processes it under the ChatGPT
+account's applicable terms and usage limits. ZapFast does not separately add
+phone-number metadata or contact records. Generation uses the account's
+available model catalog and Responses API with `store: false` and streaming.
+It uses `gpt-6-luna` when that model is listed for the signed-in account;
+otherwise generation reports that the selected model is unavailable. ZapFast
+accepts a result only after `response.completed`.
+
+Generated replies are proposals only. ZapFast never sends them automatically,
+and will not apply one over an existing draft, composer text, or attachments.
+If the composer is open and empty, the proposal is placed there; otherwise it
+is saved as that chat's local draft. Uninstalling a native plugin removes its
+files, account settings, and per-chat permissions, but preserves messages and
+drafts.
+
 On Windows, ZapFast Plugins uses its own application and instance identity
 and separate configuration, account and cache folders from ZapFast. It does
 not import the original application's data; link an account separately.

@@ -34,7 +34,8 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
                 Dialog::Shortcuts => shortcuts_width(ui.ctx().content_rect().width()),
                 Dialog::About => 380.0,
                 Dialog::ConfirmUnlink => 380.0,
-                Dialog::ConfirmRemoveAccount(_) => 380.0,
+                Dialog::ConfirmRemoveAccount(_) | Dialog::ConfirmUninstallPlugin(_) => 380.0,
+                Dialog::ConfirmEnableAssistant => 420.0,
                 Dialog::ConfirmClearMediaCache(_) => 380.0,
                 Dialog::ConfirmLeaveGroup(_) => 380.0,
                 Dialog::PairWithPhone => 380.0,
@@ -92,6 +93,8 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
                 Dialog::About => about(app, ui),
                 Dialog::ConfirmUnlink => confirm_unlink(app, ui),
                 Dialog::ConfirmRemoveAccount(id) => confirm_remove(app, ui, id),
+                Dialog::ConfirmUninstallPlugin(id) => confirm_uninstall_plugin(app, ui, &id),
+                Dialog::ConfirmEnableAssistant => confirm_enable_assistant(app, ui),
                 Dialog::ConfirmClearMediaCache(id) => confirm_clear_media(app, ui, id),
                 Dialog::ConfirmLeaveGroup(id) => confirm_leave_group(app, ui, &id),
                 Dialog::PairWithPhone => pair_with_phone(app, ui),
@@ -1637,6 +1640,40 @@ fn confirm_remove(app: &mut App, ui: &mut egui::Ui, id: crate::model::AccountId)
         )],
         &crate::i18n::gettext(locale, "Remove"),
         [Action::RemoveAccount(id)],
+    );
+}
+
+fn confirm_uninstall_plugin(app: &mut App, ui: &mut egui::Ui, id: &str) {
+    let locale = app.locale;
+    confirm_destructive(
+        app,
+        ui,
+        &crate::i18n::gettext(locale, "Uninstall this plugin?"),
+        &[&format!(
+            "{} {}",
+            crate::i18n::gettext(
+                locale,
+                "This removes the plugin, its settings, and its chat permissions. Messages and drafts are kept."
+            ),
+            id
+        )],
+        &crate::i18n::gettext(locale, "Uninstall"),
+        [Action::UninstallPlugin(id.to_owned())],
+    );
+}
+
+fn confirm_enable_assistant(app: &mut App, ui: &mut egui::Ui) {
+    let locale = app.locale;
+    confirm_destructive(
+        app,
+        ui,
+        &crate::i18n::gettext(locale, "Enable the OpenAI assistant?"),
+        &[
+            "ZapFast will send text from eligible unread direct chats and up to 32 local messages from the previous seven days to OpenAI. Groups and locked chats are excluded.",
+            "Generated replies are saved only as drafts. ZapFast will never send them automatically or replace existing composer text or attachments.",
+        ],
+        &crate::i18n::gettext(locale, "Enable"),
+        [Action::SetAssistantEnabled(true)],
     );
 }
 

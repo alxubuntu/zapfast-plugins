@@ -722,6 +722,24 @@ fn header(app: &mut App, ui: &mut egui::Ui, chat: &Chat) -> Rect {
                         })
                         .collect();
                     let plugins_in_chat = crate::i18n::gettext(app.locale, "Plugins in this chat");
+                    let assistant_in_chat = chat.kind == crate::model::ChatKind::Direct;
+                    let assistant_selected = !app
+                        .account()
+                        .settings
+                        .assistant_disabled_chats
+                        .iter()
+                        .any(|id| id == &chat.id);
+                    let assistant_label = format!(
+                        "{} OpenAI assistant",
+                        crate::i18n::gettext(
+                            app.locale,
+                            if assistant_selected {
+                                "Disable"
+                            } else {
+                                "Enable"
+                            }
+                        )
+                    );
                     let mut menu_labels = vec![
                         search_label.as_ref(),
                         voice_call_label.as_ref(),
@@ -739,6 +757,9 @@ fn header(app: &mut App, ui: &mut egui::Ui, chat: &Chat) -> Rect {
                         plugins_in_chat.as_ref(),
                     ];
                     menu_labels.extend(plugin_labels.iter().map(String::as_str));
+                    if assistant_in_chat {
+                        menu_labels.push(&assistant_label);
+                    }
                     let width = widgets::menu_width(ui, &menu_labels, true);
                     // Demo/test: hold this menu open for a screenshot.
                     #[cfg(any(test, feature = "demo"))]
@@ -803,6 +824,15 @@ fn header(app: &mut App, ui: &mut egui::Ui, chat: &Chat) -> Rect {
                                             enabled: !selected,
                                         });
                                     }
+                                }
+                            }
+                            if assistant_in_chat {
+                                widgets::menu_separator(ui, &palette);
+                                if widgets::menu_item(ui, &palette, None, &assistant_label) {
+                                    app.actions.push(Action::SetAssistantChat {
+                                        chat: chat.id.clone(),
+                                        enabled: !assistant_selected,
+                                    });
                                 }
                             }
                             if widgets::menu_item(
