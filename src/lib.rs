@@ -9,6 +9,7 @@ pub mod app_lock;
 #[cfg(target_os = "linux")]
 pub mod appearance;
 pub mod archive;
+pub(crate) mod assistant_api;
 pub mod audio;
 pub mod autostart;
 pub mod backdrop;

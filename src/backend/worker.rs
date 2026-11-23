@@ -1006,6 +1006,8 @@ pub async fn run(
                 .set_meta(star_recovery::STARS_RECOVERED, "complete")
                 .is_ok());
     let mut worker = Worker {
+        assistant_provider: "chatgpt".into(),
+        assistant_connection: None,
         assistant_batches: Default::default(),
         assistant_cancel: HashMap::new(),
         assistant_generation: HashMap::new(),
@@ -1337,13 +1339,28 @@ impl Worker {
             let events = self.events.clone();
             let waker = self.waker.clone();
             let chat = batch.chat;
+            let provider = self.assistant_provider.clone();
+            let connection = self.assistant_connection.clone();
             tokio::spawn(async move {
                 let result = tokio::select! {
                     changed = cancel.changed() => {
                         let _ = changed;
                         return;
                     }
-                    result = crate::chatgpt::draft(&prompt, None) => result,
+                    result = async {
+                        if provider == "chatgpt" {
+                            crate::chatgpt::draft(&prompt, None).await
+                        } else if let Some(connection) = connection {
+                            crate::assistant_api::draft(
+                                &connection.id,
+                                &connection.base_url,
+                                &connection.model,
+                                &prompt,
+                            ).await
+                        } else {
+                            anyhow::bail!("Selected API connection is not configured")
+                        }
+                    } => result,
                 };
                 if cancel.has_changed().unwrap_or(true) {
                     return;
@@ -1355,7 +1372,7 @@ impl Worker {
                     }
                     Err(_) => {
                         let _ = events.send(Event::Error(
-                            "Could not generate an OpenAI draft. Check the connection, model access, or usage limits.".into(),
+                            "Could not generate an assistant draft. Check the selected provider, API key, model access, or usage limits.".into(),
                         ));
                         waker.wake();
                     }
@@ -1623,6 +1640,8 @@ enum AwaitingAck {
 }
 
 struct Worker {
+    assistant_provider: String,
+    assistant_connection: Option<crate::settings::AssistantConnection>,
     assistant_batches: zapfast_plugin_host_core::batching::Pending,
     assistant_cancel: HashMap<ChatId, tokio::sync::watch::Sender<u64>>,
     assistant_generation: HashMap<ChatId, u64>,
@@ -7497,6 +7516,68 @@ impl Worker {
             return;
         }
         match command {
+            Command::SetAssistantProvider {
+                provider,
+                connection,
+            } => {
+                self.assistant_batches.clear();
+                self.assistant_provider = provider;
+                self.assistant_connection = connection;
+                for (chat, cancel) in &self.assistant_cancel {
+                    let generation = self
+                        .assistant_generation
+                        .entry(chat.clone())
+                        .and_modify(|value| *value = value.wrapping_add(1))
+                        .or_insert(1);
+                    cancel.send_replace(*generation);
+                }
+            }
+            Command::AssistantApiKeySave {
+                id,
+                name,
+                base_url,
+                key,
+            } => {
+                let events = self.events.clone();
+                let waker = self.waker.clone();
+                tokio::task::spawn_blocking(move || {
+                    let error = key
+                        .as_ref()
+                        .and_then(|key| crate::assistant_api::save_key(&id, key.expose()).err())
+                        .map(|e| e.to_string());
+                    let _ = events.send(Event::AssistantApiKeySaved {
+                        id,
+                        name,
+                        base_url,
+                        error,
+                    });
+                    waker.wake();
+                });
+            }
+            Command::AssistantApiKeyRemove { id } => {
+                let events = self.events.clone();
+                let waker = self.waker.clone();
+                tokio::task::spawn_blocking(move || {
+                    let error = crate::assistant_api::remove_key(&id)
+                        .err()
+                        .map(|e| e.to_string());
+                    let _ = events.send(Event::AssistantApiKeyRemoved { id, error });
+                    waker.wake();
+                });
+            }
+            Command::AssistantApiModels { id, base_url } => {
+                let events = self.events.clone();
+                let waker = self.waker.clone();
+                tokio::spawn(async move {
+                    let result = crate::assistant_api::models(&id, &base_url).await;
+                    let (models, error) = match result {
+                        Ok(models) => (models, None),
+                        Err(error) => (Vec::new(), Some(error.to_string())),
+                    };
+                    let _ = events.send(Event::AssistantApiModelsLoaded { id, models, error });
+                    waker.wake();
+                });
+            }
             Command::AssistantIncoming { chat, message } => {
                 if crate::model::ChatKind::from_id(&chat) == crate::model::ChatKind::Direct
                     && self
@@ -20817,6 +20898,8 @@ mod receipt_tests {
         let root =
             std::env::temp_dir().join(format!("zapfast-worker-test-{}-{n}", std::process::id()));
         let worker = Worker {
+            assistant_provider: "chatgpt".into(),
+            assistant_connection: None,
             assistant_batches: Default::default(),
             assistant_cancel: HashMap::new(),
             assistant_generation: HashMap::new(),

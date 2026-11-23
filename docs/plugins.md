@@ -28,6 +28,22 @@ After disconnecting, the next connection starts a new registration without
 suggesting the previous account. OpenAI may still use the browser's own session;
 choose a different account there or sign out in the browser if needed. The
 stable host identifier is retained.
+
+The assistant can also use saved API connections for OpenAI-compatible
+providers, including OpenAI API keys, OpenRouter, DeepSeek, and custom
+endpoints exposing `GET /models` with a `data` array and
+`POST /chat/completions`. Add a connection under Settings → Plugins, enter its
+base URL and API key, load its model catalog, then choose a model and select it
+as the default assistant provider. API keys are stored in the operating
+system's credential store; settings contain only connection names, URLs,
+selected models, and provider choice. Removing a connection deletes its key.
+The selected provider receives the chat context described below. Check that
+provider's privacy policy, data handling, model availability, and billing.
+ZapFast does not silently fall back to another provider if a request fails.
+An OpenAI API key is distinct from the ChatGPT sign-in above and is subject to
+OpenAI's [business/API terms](https://openai.com/policies/business-terms/) and
+API data policies; ChatGPT consumer terms do not grant API access. OpenAI says
+API data is not used to train its models by default unless the account opts in.
 Large credentials are split across bounded keyring entries to support Windows.
 An interrupted update can leave unused parts in the keyring; disconnect removes
 both active and staged parts.
@@ -40,17 +56,17 @@ excluded. Messages are grouped until 30 seconds after the latest message.
 Reading the chat during that wait does not cancel generation; disabling the
 assistant globally or for that chat does.
 
-To draft a reply, ZapFast sends OpenAI the textual contents of up to 32 local
+To draft a reply, ZapFast sends the selected provider the textual contents of up to 32 local
 messages from the previous seven days and the new incoming text. Text captions
 on images, videos, and documents may be included; media files, phone numbers
 as separate metadata, contacts, and other chats are not included. This context
-can contain personal information. OpenAI processes it under the ChatGPT
-account's applicable terms and usage limits. ZapFast does not separately add
-phone-number metadata or contact records. Generation uses the account's
-available model catalog and Responses API with `store: false` and streaming.
-It uses `gpt-6-luna` when that model is listed for the signed-in account;
-otherwise generation reports that the selected model is unavailable. ZapFast
-accepts a result only after `response.completed`.
+can contain personal information. The selected provider processes it under
+that provider's applicable terms, privacy policy, and usage limits. ZapFast
+does not separately add phone-number metadata or contact records. ChatGPT
+sign-in uses the signed-in account's available model catalog and Responses API
+with `store: false` and streaming; compatible API connections use the chosen
+model with `POST /chat/completions`. A failed request is reported, not routed
+to another provider.
 
 Generated replies are proposals only. ZapFast never sends them automatically,
 and will not apply one over user-written or edited text, or attachments.

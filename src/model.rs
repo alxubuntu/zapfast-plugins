@@ -2480,6 +2480,7 @@ pub enum Dialog {
     ConfirmRemoveAccount(AccountId),
     ConfirmUninstallPlugin(String),
     ConfirmEnableAssistant,
+    ConfirmAssistantProvider(String),
     /// Confirms emptying one account's media cache.
     ConfirmClearMediaCache(AccountId),
     /// Phone number used for pairing-code linking.
@@ -2713,6 +2714,23 @@ pub enum Action {
     InstallPlugin,
     ChatGptSignIn,
     ChatGptSignOut,
+    SaveAssistantApiConnection {
+        id: String,
+        name: String,
+        base_url: String,
+        key: SecretString,
+    },
+    RemoveAssistantApiConnection(String),
+    SelectAssistantProvider(String),
+    ConfirmAssistantProvider(String),
+    SelectAssistantApiModel {
+        id: String,
+        model: String,
+    },
+    LoadAssistantApiModels {
+        id: String,
+        base_url: String,
+    },
     SetAssistantEnabled(bool),
     SetAssistantChat {
         chat: ChatId,
@@ -3478,6 +3496,38 @@ pub enum Action {
     CancelPictureEdit,
     /// Removes all pending attachments.
     ClearPending,
+}
+
+/// API credential whose debug representation can never reveal its contents.
+#[derive(Clone, PartialEq)]
+pub struct SecretString(zeroize::Zeroizing<String>);
+
+impl SecretString {
+    pub fn new(value: String) -> Self {
+        Self(zeroize::Zeroizing::new(value))
+    }
+
+    pub fn expose(&self) -> &str {
+        self.0.as_str()
+    }
+}
+
+impl std::fmt::Debug for SecretString {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("[REDACTED]")
+    }
+}
+
+#[cfg(test)]
+mod assistant_secret_tests {
+    use super::SecretString;
+
+    #[test]
+    fn api_key_debug_output_is_redacted() {
+        let secret = SecretString::new("sentinel-secret".into());
+        assert_eq!(format!("{secret:?}"), "[REDACTED]");
+        assert!(!format!("{secret:?}").contains("sentinel-secret"));
+    }
 }
 
 #[cfg(test)]

@@ -452,6 +452,11 @@ pub struct App {
     pub settings: Settings,
     pub chatgpt_email: Option<String>,
     pub chatgpt_busy: bool,
+    pub assistant_api_name: String,
+    pub assistant_api_url: String,
+    pub assistant_api_key: String,
+    pub assistant_api_editing: Option<String>,
+    pub assistant_api_models: HashMap<String, Vec<String>>,
     /// Writes settings and the account roster on a thread of its own, so
     /// a save never stalls the window; flushed at exit and before a suspend.
     pub files: fastframe_file::Writer,
@@ -1091,6 +1096,58 @@ pub struct Staged {
 }
 
 impl App {
+    fn assistant_provider_available(&self) -> bool {
+        if self.settings.assistant_provider == "chatgpt" {
+            self.chatgpt_email.is_some()
+        } else {
+            self.settings
+                .assistant_connections
+                .iter()
+                .any(|connection| {
+                    connection.id == self.settings.assistant_provider
+                        && !connection.model.is_empty()
+                })
+        }
+    }
+
+    fn assistant_provider_configured(&self, provider: &str) -> bool {
+        provider == "chatgpt"
+            || self
+                .settings
+                .assistant_connections
+                .iter()
+                .any(|connection| connection.id == provider && !connection.model.is_empty())
+    }
+
+    fn send_assistant_provider_to_accounts(&self) {
+        let provider = self.settings.assistant_provider.clone();
+        let connection = self
+            .settings
+            .assistant_connections
+            .iter()
+            .find(|connection| connection.id == provider)
+            .cloned();
+        for account in &self.accounts {
+            account
+                .backend
+                .send(Command::CancelAssistant { chat: None });
+            account.backend.send(Command::SetAssistantProvider {
+                provider: provider.clone(),
+                connection: connection.clone(),
+            });
+        }
+    }
+
+    fn set_assistant_provider(&mut self, provider: String) {
+        if self.assistant_provider_configured(&provider) {
+            self.settings.assistant_provider = provider;
+            self.mark_settings_dirty();
+            self.send_assistant_provider_to_accounts();
+        } else {
+            self.toast_error("Load the provider's model catalog and select a model first.");
+        }
+    }
+
     /// Stages an attachment and answers with the identity the backend names
     /// when it is done with it.
     pub fn stage(&mut self, item: Pending) -> AttachmentId {
@@ -1573,6 +1630,11 @@ impl App {
             settings,
             chatgpt_email: None,
             chatgpt_busy: false,
+            assistant_api_name: String::new(),
+            assistant_api_url: "https://api.openai.com/v1".into(),
+            assistant_api_key: String::new(),
+            assistant_api_editing: None,
+            assistant_api_models: HashMap::new(),
             locale,
             settings_dirty: false,
             last_settings_save: Instant::now(),
@@ -1828,6 +1890,7 @@ impl App {
         app.label_filter = app.remembered_label();
         if !cfg!(any(test, feature = "demo")) {
             app.backend.send(Command::ChatGptLoadStatus);
+            app.send_assistant_provider_to_accounts();
         }
         app
     }
@@ -2119,6 +2182,7 @@ impl App {
         self.clear_account_ui();
         self.accounts.push(account);
         self.active = self.accounts.len() - 1;
+        self.send_assistant_provider_to_accounts();
         self.adding_account = true;
         self.page = Page::Chats;
         self.restore_composer();
@@ -3743,7 +3807,7 @@ impl App {
                 text,
             } => {
                 let assistant_eligible = self.settings.assistant_enabled
-                    && self.chatgpt_email.is_some()
+                    && self.assistant_provider_available()
                     && crate::model::ChatKind::from_id(&chat) == crate::model::ChatKind::Direct
                     && !self.blocklist.contains(&chat)
                     && !self
@@ -3836,9 +3900,63 @@ impl App {
             Event::ChatGptConnectionLoaded(email) => {
                 self.chatgpt_email = email;
             }
+            Event::AssistantApiKeySaved {
+                id,
+                name,
+                base_url,
+                error,
+            } => {
+                if let Some(error) = error {
+                    self.toast_error(format!("Could not save API key: {error}"));
+                } else {
+                    if let Some(connection) = self
+                        .settings
+                        .assistant_connections
+                        .iter_mut()
+                        .find(|item| item.id == id)
+                    {
+                        connection.name = name.trim().to_owned();
+                        connection.base_url = base_url.trim_end_matches('/').to_owned();
+                    } else {
+                        self.settings.assistant_connections.push(
+                            crate::settings::AssistantConnection {
+                                id: id.clone(),
+                                name: name.trim().to_owned(),
+                                base_url: base_url.trim_end_matches('/').to_owned(),
+                                model: String::new(),
+                            },
+                        );
+                    }
+                    if self.assistant_api_editing.as_deref() == Some(id.as_str()) {
+                        self.assistant_api_editing = None;
+                    }
+                    self.settings_dirty = true;
+                    if self.settings.assistant_provider == id {
+                        self.send_assistant_provider_to_accounts();
+                    }
+                    self.toast("API connection saved securely. Load its model catalog.");
+                }
+            }
+            Event::AssistantApiKeyRemoved { id, error } => {
+                if let Some(error) = error {
+                    self.toast_error(format!("Could not remove API key: {error}"));
+                } else {
+                    self.settings
+                        .assistant_connections
+                        .retain(|connection| connection.id != id);
+                    self.mark_settings_dirty();
+                }
+            }
+            Event::AssistantApiModelsLoaded { id, models, error } => {
+                if let Some(error) = error {
+                    self.toast_error(format!("Could not load provider models: {error}"));
+                } else {
+                    self.assistant_api_models.insert(id, models);
+                }
+            }
             Event::AssistantDraftReady { chat, text } => {
                 let eligible = self.settings.assistant_enabled
-                    && self.chatgpt_email.is_some()
+                    && self.assistant_provider_available()
                     && crate::model::ChatKind::from_id(&chat) == crate::model::ChatKind::Direct
                     && !self.blocklist.contains(&chat)
                     && !self
@@ -9708,6 +9826,89 @@ impl App {
                     self.backend.send(Command::ChatGptSignOut);
                 }
             }
+            Action::SaveAssistantApiConnection {
+                id,
+                name,
+                base_url,
+                key,
+            } => {
+                if name.trim().is_empty()
+                    || crate::assistant_api::validate_base_url(&base_url).is_err()
+                {
+                    self.toast_error("Enter a connection name and an HTTPS API base URL.");
+                } else if key.expose().is_empty()
+                    && !self
+                        .settings
+                        .assistant_connections
+                        .iter()
+                        .any(|connection| connection.id == id)
+                {
+                    self.toast_error("Enter an API key for a new connection.");
+                } else if self.settings.assistant_enabled
+                    && self.settings.assistant_provider == id
+                    && self
+                        .settings
+                        .assistant_connections
+                        .iter()
+                        .find(|connection| connection.id == id)
+                        .is_some_and(|connection| {
+                            connection.base_url != base_url.trim_end_matches('/')
+                        })
+                {
+                    self.toast_error(
+                        "Disable the assistant before changing the active provider's API destination.",
+                    );
+                } else {
+                    self.assistant_api_name = name;
+                    self.assistant_api_url = base_url.clone();
+                    self.backend.send(Command::AssistantApiKeySave {
+                        id,
+                        name: self.assistant_api_name.clone(),
+                        base_url,
+                        key: (!key.expose().is_empty()).then_some(key),
+                    });
+                }
+            }
+            Action::RemoveAssistantApiConnection(id) => {
+                self.backend
+                    .send(Command::AssistantApiKeyRemove { id: id.clone() });
+                if self.settings.assistant_provider == id {
+                    self.settings.assistant_provider = "unconfigured".into();
+                }
+                self.send_assistant_provider_to_accounts();
+            }
+            Action::LoadAssistantApiModels { id, base_url } => {
+                self.backend
+                    .send(Command::AssistantApiModels { id, base_url });
+            }
+            Action::SelectAssistantProvider(provider) => {
+                if !self.assistant_provider_configured(&provider) {
+                    self.toast_error("Load the provider's model catalog and select a model first.");
+                } else if self.settings.assistant_enabled
+                    && self.settings.assistant_provider != provider
+                {
+                    self.dialog = Some(Dialog::ConfirmAssistantProvider(provider));
+                } else {
+                    self.set_assistant_provider(provider);
+                }
+            }
+            Action::ConfirmAssistantProvider(provider) => {
+                self.set_assistant_provider(provider);
+            }
+            Action::SelectAssistantApiModel { id, model } => {
+                if let Some(connection) = self
+                    .settings
+                    .assistant_connections
+                    .iter_mut()
+                    .find(|connection| connection.id == id)
+                {
+                    connection.model = model;
+                    self.mark_settings_dirty();
+                    if self.settings.assistant_provider == id {
+                        self.send_assistant_provider_to_accounts();
+                    }
+                }
+            }
             Action::SetAssistantEnabled(enabled) => {
                 if self.settings.assistant_enabled != enabled {
                     self.settings.assistant_enabled = enabled;
@@ -9717,9 +9918,9 @@ impl App {
                             .backend
                             .send(Command::CancelAssistant { chat: None });
                     }
-                    if enabled && self.chatgpt_email.is_none() {
+                    if enabled && !self.assistant_provider_available() {
                         self.toast_error(
-                            "Connect a ChatGPT account before enabling the assistant.",
+                            "Connect ChatGPT or configure an API connection before enabling the assistant.",
                         );
                         self.settings.assistant_enabled = false;
                         self.settings_dirty = true;

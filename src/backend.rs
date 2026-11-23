@@ -166,6 +166,23 @@ pub enum Command {
     ChatGptSignIn,
     ChatGptSignOut,
     ChatGptLoadStatus,
+    AssistantApiKeySave {
+        id: String,
+        name: String,
+        base_url: String,
+        key: Option<crate::model::SecretString>,
+    },
+    AssistantApiModels {
+        id: String,
+        base_url: String,
+    },
+    AssistantApiKeyRemove {
+        id: String,
+    },
+    SetAssistantProvider {
+        provider: String,
+        connection: Option<crate::settings::AssistantConnection>,
+    },
     AssistantIncoming {
         chat: ChatId,
         message: String,
@@ -1231,6 +1248,21 @@ pub enum Event {
         revocation_confirmed: bool,
     },
     ChatGptConnectionLoaded(Option<String>),
+    AssistantApiKeySaved {
+        id: String,
+        name: String,
+        base_url: String,
+        error: Option<String>,
+    },
+    AssistantApiKeyRemoved {
+        id: String,
+        error: Option<String>,
+    },
+    AssistantApiModelsLoaded {
+        id: String,
+        models: Vec<String>,
+        error: Option<String>,
+    },
     AssistantDraftReady {
         chat: ChatId,
         text: String,

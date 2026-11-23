@@ -410,6 +410,11 @@ pub struct Settings {
     /// OpenAI assistant master switch. Off until the privacy notice is
     /// explicitly accepted; when on it considers unread direct chats by default.
     pub assistant_enabled: bool,
+    /// Selected assistant backend: "chatgpt" or a configured API connection ID.
+    pub assistant_provider: String,
+    /// Non-secret metadata for compatible OpenAI API connections. Keys live
+    /// in the operating system credential store.
+    pub assistant_connections: Vec<AssistantConnection>,
     /// [`SETTINGS_VERSION`] when written; missing, and so 0, in older files.
     #[serde(default)]
     pub version: u32,
@@ -553,11 +558,21 @@ pub struct Settings {
     pub window_maximized: bool,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AssistantConnection {
+    pub id: String,
+    pub name: String,
+    pub base_url: String,
+    pub model: String,
+}
+
 impl Default for Settings {
     fn default() -> Self {
         Self {
             version: SETTINGS_VERSION,
             assistant_enabled: false,
+            assistant_provider: "chatgpt".into(),
+            assistant_connections: Vec::new(),
             theme: ThemeChoice::System,
             messages_theme: false,
             font: FontChoice::System,

@@ -844,6 +844,136 @@ fn sections(app: &App) -> Vec<Section> {
             });
         }
     });
+    let selected_provider = app.settings.assistant_provider.clone();
+    let provider_label = if selected_provider == "chatgpt" {
+        "ChatGPT".to_owned()
+    } else {
+        app.settings
+            .assistant_connections
+            .iter()
+            .find(|connection| connection.id == selected_provider)
+            .map(|connection| connection.name.clone())
+            .unwrap_or_else(|| "Unavailable connection".into())
+    };
+    plugins.row(
+        "Default assistant provider",
+        provider_label,
+        move |ui, app| {
+            egui::ComboBox::from_id_salt("assistant-default-provider")
+                .selected_text(if selected_provider == "chatgpt" {
+                    "ChatGPT".to_owned()
+                } else {
+                    app.settings
+                        .assistant_connections
+                        .iter()
+                        .find(|item| item.id == selected_provider)
+                        .map(|item| item.name.clone())
+                        .unwrap_or_else(|| "Unavailable".into())
+                })
+                .show_ui(ui, |ui| {
+                    if ui
+                        .selectable_label(selected_provider == "chatgpt", "ChatGPT")
+                        .clicked()
+                    {
+                        app.actions
+                            .push(Action::SelectAssistantProvider("chatgpt".into()));
+                    }
+                    for connection in &app.settings.assistant_connections {
+                        if ui
+                            .selectable_label(selected_provider == connection.id, &connection.name)
+                            .clicked()
+                        {
+                            app.actions
+                                .push(Action::SelectAssistantProvider(connection.id.clone()));
+                        }
+                    }
+                });
+        },
+    );
+    plugins.row(
+        "OpenAI-compatible API",
+        "Add OpenAI, OpenRouter, DeepSeek, or another compatible provider. Keys are stored in the system credential store.",
+        move |ui, app| {
+            ui.horizontal_wrapped(|ui| {
+                ui.label("Name");
+                ui.add(egui::TextEdit::singleline(&mut app.assistant_api_name).desired_width(100.0));
+                egui::ComboBox::from_id_salt("assistant-api-preset")
+                    .selected_text("Provider")
+                    .show_ui(ui, |ui| {
+                        for (name, url) in [
+                            ("OpenAI", "https://api.openai.com/v1"),
+                            ("OpenRouter", "https://openrouter.ai/api/v1"),
+                            ("DeepSeek", "https://api.deepseek.com"),
+                        ] {
+                            if ui.button(name).clicked() {
+                                app.assistant_api_name = name.into();
+                                app.assistant_api_url = url.into();
+                            }
+                        }
+                    });
+                ui.label("Base URL");
+                ui.add(egui::TextEdit::singleline(&mut app.assistant_api_url).desired_width(190.0));
+            });
+            ui.horizontal_wrapped(|ui| {
+                ui.label("API key");
+                ui.add(egui::TextEdit::singleline(&mut app.assistant_api_key)
+                    .password(true).desired_width(180.0)
+                    .hint_text("Required for new, optional when editing"));
+                if theme::soft_button(ui, &palette, None, "Add / save", false).clicked() {
+                    let id = app.assistant_api_editing.clone().or_else(|| app.settings.assistant_connections.iter()
+                        .find(|item| item.name == app.assistant_api_name.trim())
+                        .map(|item| item.id.clone()));
+                    let id = match id {
+                        Some(id) => id,
+                        None => match crate::assistant_api::new_connection_id() {
+                            Ok(id) => id,
+                            Err(error) => {
+                                app.toast_error(format!("Could not create an API connection ID: {error}"));
+                                return;
+                            }
+                        },
+                    };
+                    app.actions.push(Action::SaveAssistantApiConnection {
+                        id, name: app.assistant_api_name.clone(),
+                        base_url: app.assistant_api_url.clone(),
+                        key: crate::model::SecretString::new(std::mem::take(&mut app.assistant_api_key)),
+                    });
+                }
+            });
+            for connection in app.settings.assistant_connections.clone() {
+                ui.horizontal_wrapped(|ui| {
+                    ui.label(format!("{} · {}", connection.name, connection.base_url));
+                    if theme::soft_button(ui, &palette, None, "Edit", false).clicked() {
+                        app.assistant_api_editing = Some(connection.id.clone());
+                        app.assistant_api_name = connection.name.clone();
+                        app.assistant_api_url = connection.base_url.clone();
+                    }
+                    if theme::soft_button(ui, &palette, None, "Load models", false).clicked() {
+                        app.actions.push(Action::LoadAssistantApiModels {
+                            id: connection.id.clone(), base_url: connection.base_url.clone(),
+                        });
+                    }
+                    if let Some(models) = app.assistant_api_models.get(&connection.id) {
+                        egui::ComboBox::from_id_salt(("assistant-model", &connection.id))
+                            .selected_text(if connection.model.is_empty() { "Select model" } else { &connection.model })
+                            .show_ui(ui, |ui| {
+                                for model in models {
+                                    if ui.selectable_label(connection.model == *model, model).clicked() {
+                                        app.actions.push(Action::SelectAssistantApiModel {
+                                            id: connection.id.clone(),
+                                            model: model.clone(),
+                                        });
+                                    }
+                                }
+                            });
+                    }
+                    if theme::soft_button(ui, &palette, None, "Remove", false).clicked() {
+                        app.actions.push(Action::RemoveAssistantApiConnection(connection.id.clone()));
+                    }
+                });
+            }
+        },
+    );
     let assistant_enabled = app.settings.assistant_enabled;
     plugins.row(
         "OpenAI assistant",

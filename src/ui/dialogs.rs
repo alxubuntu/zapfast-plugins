@@ -36,6 +36,7 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
                 Dialog::ConfirmUnlink => 380.0,
                 Dialog::ConfirmRemoveAccount(_) | Dialog::ConfirmUninstallPlugin(_) => 380.0,
                 Dialog::ConfirmEnableAssistant => 420.0,
+                Dialog::ConfirmAssistantProvider(_) => 380.0,
                 Dialog::ConfirmClearMediaCache(_) => 380.0,
                 Dialog::ConfirmLeaveGroup(_) => 380.0,
                 Dialog::PairWithPhone => 380.0,
@@ -95,6 +96,9 @@ pub fn show(app: &mut App, ctx: &egui::Context) {
                 Dialog::ConfirmRemoveAccount(id) => confirm_remove(app, ui, id),
                 Dialog::ConfirmUninstallPlugin(id) => confirm_uninstall_plugin(app, ui, &id),
                 Dialog::ConfirmEnableAssistant => confirm_enable_assistant(app, ui),
+                Dialog::ConfirmAssistantProvider(provider) => {
+                    confirm_assistant_provider(app, ui, &provider)
+                }
                 Dialog::ConfirmClearMediaCache(id) => confirm_clear_media(app, ui, id),
                 Dialog::ConfirmLeaveGroup(id) => confirm_leave_group(app, ui, &id),
                 Dialog::PairWithPhone => pair_with_phone(app, ui),
@@ -1664,16 +1668,53 @@ fn confirm_uninstall_plugin(app: &mut App, ui: &mut egui::Ui, id: &str) {
 
 fn confirm_enable_assistant(app: &mut App, ui: &mut egui::Ui) {
     let locale = app.locale;
+    let provider = if app.settings.assistant_provider == "chatgpt" {
+        "ChatGPT".to_owned()
+    } else {
+        app.settings
+            .assistant_connections
+            .iter()
+            .find(|connection| connection.id == app.settings.assistant_provider)
+            .map(|connection| connection.name.clone())
+            .unwrap_or_else(|| "the selected provider".into())
+    };
+    let disclosure = format!(
+        "ZapFast will send text from eligible unread direct chats and up to 32 local messages from the previous seven days to {provider}. Groups and locked chats are excluded."
+    );
     confirm_destructive(
         app,
         ui,
         &crate::i18n::gettext(locale, "Enable the OpenAI assistant?"),
         &[
-            "ZapFast will send text from eligible unread direct chats and up to 32 local messages from the previous seven days to OpenAI. Groups and locked chats are excluded.",
+            disclosure.as_str(),
             "Generated replies are saved only as drafts. ZapFast will never send them automatically or replace existing composer text or attachments.",
         ],
         &crate::i18n::gettext(locale, "Enable"),
         [Action::SetAssistantEnabled(true)],
+    );
+}
+
+fn confirm_assistant_provider(app: &mut App, ui: &mut egui::Ui, provider_id: &str) {
+    let provider = if provider_id == "chatgpt" {
+        "ChatGPT".to_owned()
+    } else {
+        app.settings
+            .assistant_connections
+            .iter()
+            .find(|connection| connection.id == provider_id)
+            .map(|connection| connection.name.clone())
+            .unwrap_or_else(|| "the selected provider".into())
+    };
+    let disclosure = format!(
+        "The assistant will send eligible chat text and recent local context to {provider}. Only drafts are generated; messages are never sent automatically."
+    );
+    confirm_destructive(
+        app,
+        ui,
+        "Allow this provider to receive assistant context?",
+        &[disclosure.as_str()],
+        "Continue",
+        [Action::ConfirmAssistantProvider(provider_id.to_owned())],
     );
 }
 
