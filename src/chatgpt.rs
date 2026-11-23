@@ -471,7 +471,7 @@ fn receive_callback(listener: std::net::TcpListener, expected_state: &str) -> Re
         .next()
         .and_then(|line| line.split_whitespace().nth(1))
         .context("invalid OAuth callback request line")?;
-    let page = "Sign-in complete. You may close this browser window.";
+    let page = "Authorization received. Return to ZapFast to see whether sign-in succeeds.";
     write!(
         socket,
         "HTTP/1.1 200 OK\r\nContent-Type: text/plain; charset=utf-8\r\nConnection: close\r\nContent-Length: {}\r\n\r\n{}",
@@ -525,7 +525,8 @@ async fn validate_id_token(
             .decode(value)
             .context("invalid ID token encoding")
     };
-    let header: Value = serde_json::from_slice(&decode(header)?)?;
+    let encoded_header = header;
+    let header: Value = serde_json::from_slice(&decode(encoded_header)?)?;
     let claims: Value = serde_json::from_slice(&decode(payload)?)?;
     ensure!(header["alg"] == "RS256", "unsupported ID token signature");
     let kid = header["kid"].as_str().context("ID token has no key ID")?;
@@ -545,10 +546,7 @@ async fn validate_id_token(
     let n = decode(&jwk.n)?;
     let e = decode(&jwk.e)?;
     let signature = decode(signature)?;
-    let message = format!("{header}.{payload}");
-    RsaPublicKeyComponents { n: &n, e: &e }
-        .verify(&RSA_PKCS1_2048_8192_SHA256, message.as_bytes(), &signature)
-        .map_err(|_| anyhow::anyhow!("ChatGPT ID token signature is invalid"))?;
+    verify_id_token_signature(encoded_header, payload, &signature, &n, &e)?;
     ensure!(claims["iss"] == ISSUER, "unexpected ID token issuer");
     let valid_audience = claims["aud"].as_str() == Some(audience)
         || claims["aud"]
@@ -583,6 +581,19 @@ async fn validate_id_token(
             .into(),
         email: claims["email"].as_str().map(str::to_owned),
     })
+}
+
+fn verify_id_token_signature(
+    encoded_header: &str,
+    encoded_payload: &str,
+    signature: &[u8],
+    n: &[u8],
+    e: &[u8],
+) -> Result<()> {
+    let message = format!("{encoded_header}.{encoded_payload}");
+    RsaPublicKeyComponents { n, e }
+        .verify(&RSA_PKCS1_2048_8192_SHA256, message.as_bytes(), signature)
+        .map_err(|_| anyhow::anyhow!("ChatGPT ID token signature is invalid"))
 }
 
 fn save_credentials(credentials: &Credentials) -> Result<()> {
@@ -671,6 +682,27 @@ async fn blocking<T: Send + 'static>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn id_token_verifies_original_encoded_segments_and_rejects_tampering() {
+        let decode = |s: &str| {
+            base64::engine::general_purpose::URL_SAFE_NO_PAD
+                .decode(s)
+                .unwrap()
+        };
+        let n = decode(
+            "0YutUUNTTJhU8YQTaUilWADuCLWFA6RTGObHWZX1RcIt3eTuaCCyeR0qD8J0cC8ggrHxKS8is1pfifVFx9BGGhi10yu_VTuwm1R-2gYcEdfnIi7p1ZgHamMu23BJUr0dYyZfhMX8B3Ov6EC6o5eU9MSO3r0SrlnxKGaSk3jZsUEW2ayY8JCbTPxpsxCrtwT1MovhXJA1-Z-DRKXdJygBGxTVz4o3s-EnjodeJXkZkrBcq0Hhv9yWpnxb8JeUetvl-A60nkY9FVaV0JMLHJuSrHBDcNrFkIaalgL98DL5CheJHU8_0BucDFmb_0lbV8X4B_rRoEOdCO3Zb0uYwlhHFw",
+        );
+        let signature = decode(
+            "mSQr3vmf22rVA-xgRrWDEDMkrmt98zcPZVl4b1TIukfIx9nR9NWI6K7mxXHV9cVTB2LPZGHCLbIW-4dmACGThIdlvkeunMgZpSSIAZ0lPwsYjkdsI_Bf_337NIsoD9cFc_LRwzT3SaFNnS-7jGauFuH63APsq3Ka0ikcpS7d6cJYQNHtyjNKognA_jkk_a8B3zXjTQhP6gVgh82pYzJTK2qnA3aEhqclAhuEZUzFCCmZXGxNCjNisDaM3NruyqHctCN3fZBOdL6FRxnEkhdffT8CU85J2FkuJRgrK89oKC4tF6hhBBcq7rFBSamBFqnYxTJmDgWsY5trtiEvSzTiXQ",
+        );
+        let header = "eyJhbGciOiJSUzI1NiIsImtpZCI6InRlc3QifQ";
+        let payload = "eyJzdWIiOiJmaXh0dXJlIn0";
+        let e = [1, 0, 1];
+        assert!(verify_id_token_signature(header, payload, &signature, &n, &e).is_ok());
+        assert!(verify_id_token_signature(header, "e30", &signature, &n, &e).is_err());
+        assert!(verify_id_token_signature("e30", payload, &signature, &n, &e).is_err());
+    }
 
     #[test]
     fn callback_requires_the_exact_path_state_and_authorization_code() {
