@@ -890,13 +890,21 @@ fn sections(app: &App) -> Vec<Section> {
                 });
         },
     );
-    plugins.row(
-        "OpenAI-compatible API",
-        "Add OpenAI, OpenRouter, DeepSeek, or another compatible provider. Keys are stored in the system credential store.",
+    plugins.block(
+        vec![
+            "OpenAI-compatible API".into(),
+            "OpenAI OpenRouter DeepSeek provider API key model connection".into(),
+        ],
         move |ui, app| {
-            ui.horizontal_wrapped(|ui| {
-                ui.label("Name");
-                ui.add(egui::TextEdit::singleline(&mut app.assistant_api_name).desired_width(100.0));
+            theme::text(ui, "OpenAI-compatible API", theme::medium(14.0), palette.text);
+            theme::paragraph(
+                ui,
+                "Add OpenAI, OpenRouter, DeepSeek, or another compatible provider. Keys are stored in the system credential store.",
+                theme::regular(12.5),
+                palette.secondary,
+            );
+            ui.add_space(8.0);
+            ui.label("Provider");
                 egui::ComboBox::from_id_salt("assistant-api-preset")
                     .selected_text("Provider")
                     .show_ui(ui, |ui| {
@@ -911,14 +919,15 @@ fn sections(app: &App) -> Vec<Section> {
                             }
                         }
                     });
-                ui.label("Base URL");
-                ui.add(egui::TextEdit::singleline(&mut app.assistant_api_url).desired_width(190.0));
-            });
-            ui.horizontal_wrapped(|ui| {
-                ui.label("API key");
+            ui.label("Name");
+            ui.add(egui::TextEdit::singleline(&mut app.assistant_api_name).desired_width(ui.available_width()));
+            ui.label("Base URL");
+            ui.add(egui::TextEdit::singleline(&mut app.assistant_api_url).desired_width(ui.available_width()));
+            ui.label("API key");
                 ui.add(egui::TextEdit::singleline(&mut app.assistant_api_key)
-                    .password(true).desired_width(180.0)
+                    .password(true).desired_width(ui.available_width())
                     .hint_text("Required for new, optional when editing"));
+            ui.add_space(6.0);
                 if theme::soft_button(ui, &palette, None, "Add / save", false).clicked() {
                     let id = app.assistant_api_editing.clone().or_else(|| app.settings.assistant_connections.iter()
                         .find(|item| item.name == app.assistant_api_name.trim())
@@ -939,10 +948,11 @@ fn sections(app: &App) -> Vec<Section> {
                         key: crate::model::SecretString::new(std::mem::take(&mut app.assistant_api_key)),
                     });
                 }
-            });
             for connection in app.settings.assistant_connections.clone() {
+                ui.add_space(8.0);
+                ui.label(&connection.name);
+                ui.label(&connection.base_url);
                 ui.horizontal_wrapped(|ui| {
-                    ui.label(format!("{} · {}", connection.name, connection.base_url));
                     if theme::soft_button(ui, &palette, None, "Edit", false).clicked() {
                         app.assistant_api_editing = Some(connection.id.clone());
                         app.assistant_api_name = connection.name.clone();
@@ -972,6 +982,7 @@ fn sections(app: &App) -> Vec<Section> {
                     }
                 });
             }
+            ui.add_space(10.0);
         },
     );
     let assistant_enabled = app.settings.assistant_enabled;
