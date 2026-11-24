@@ -11,6 +11,9 @@ protocol. These notes are for coding agents and new contributors.
   operating system permissions of the user. Respect existing drafts and do
   not send a message when a plugin asks to prepare a draft. WhatsApp's terms
   and account restrictions may apply to automation.
+- When the user asks for a ZIP deliverable, package the Windows executable
+  with its required runtime DLLs, not a source archive. Preserve any existing
+  ZIP and give the new package its own name.
 - Plugin installation stages files and atomically renames the directory into
   place (`plugins/host-core/src/lib.rs`). Close every handle to staged files
   before the rename: on Windows, open executable or manifest handles can
