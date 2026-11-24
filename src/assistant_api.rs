@@ -166,6 +166,78 @@ fn parse_completion(response: &serde_json::Value) -> Result<String> {
     Ok(text)
 }
 
+/// Transcribes a WAV voice note only through OpenAI's official API. Requiring
+/// the official host here prevents an API key saved for an arbitrary
+/// OpenAI-compatible endpoint from being sent to a different service.
+pub async fn transcribe_openai(id: &str, base: &str, wav: Vec<u8>) -> Result<String> {
+    const MAX_AUDIO_BYTES: usize = 25_000_000;
+    ensure!(
+        wav.len() <= MAX_AUDIO_BYTES,
+        "voice note exceeds OpenAI's 25 MiB transcription limit"
+    );
+    let parsed =
+        reqwest::Url::parse(base.trim_end_matches('/')).context("invalid OpenAI API base URL")?;
+    ensure!(
+        parsed.scheme() == "https"
+            && parsed.host_str() == Some("api.openai.com")
+            && matches!(parsed.path(), "" | "/" | "/v1")
+            && parsed.username().is_empty()
+            && parsed.password().is_none()
+            && parsed.query().is_none()
+            && parsed.fragment().is_none()
+            && parsed.port().is_none_or(|port| port == 443),
+        "voice transcription requires the official https://api.openai.com/v1 connection"
+    );
+    let key = tokio::task::spawn_blocking({
+        let id = id.to_owned();
+        move || load_key(&id)
+    })
+    .await
+    .context("load OpenAI API key")??;
+    let file = reqwest::multipart::Part::bytes(wav)
+        .file_name("voice-note.wav")
+        .mime_str("audio/wav")
+        .context("prepare WAV voice note")?;
+    let form = reqwest::multipart::Form::new()
+        .text("model", "gpt-4o-mini-transcribe")
+        .part("file", file);
+    let response: serde_json::Value = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(120))
+        .build()?
+        .post("https://api.openai.com/v1/audio/transcriptions")
+        .bearer_auth(key.as_str())
+        .multipart(form)
+        .send()
+        .await
+        .context("request OpenAI voice transcription")?
+        .error_for_status()
+        .context("OpenAI rejected the voice transcription request")?
+        .json()
+        .await
+        .context("invalid OpenAI transcription response")?;
+    let text = response["text"]
+        .as_str()
+        .context("OpenAI returned no transcription text")?
+        .trim()
+        .to_owned();
+    ensure!(!text.is_empty(), "OpenAI returned an empty transcription");
+    ensure!(text.len() <= 16 * 1024, "transcription is too long");
+    Ok(text)
+}
+
+pub fn is_official_openai_connection(connection: &crate::settings::AssistantConnection) -> bool {
+    reqwest::Url::parse(connection.base_url.trim_end_matches('/')).is_ok_and(|url| {
+        url.scheme() == "https"
+            && url.host_str() == Some("api.openai.com")
+            && matches!(url.path(), "" | "/" | "/v1")
+            && url.username().is_empty()
+            && url.password().is_none()
+            && url.query().is_none()
+            && url.fragment().is_none()
+            && url.port().is_none_or(|port| port == 443)
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -180,6 +252,28 @@ mod tests {
         assert!(endpoint("http://api.example/v1", "models").is_err());
         assert!(endpoint("https://user:secret@api.example/v1", "models").is_err());
         assert!(endpoint("https://api.example/v1?token=secret", "models").is_err());
+    }
+
+    #[test]
+    fn transcription_connection_must_be_official_openai() {
+        let connection = |base_url: &str| crate::settings::AssistantConnection {
+            id: "test".into(),
+            name: "test".into(),
+            base_url: base_url.into(),
+            model: "model".into(),
+        };
+        assert!(is_official_openai_connection(&connection(
+            "https://api.openai.com/v1"
+        )));
+        assert!(!is_official_openai_connection(&connection(
+            "https://api.openai.com.attacker.example/v1"
+        )));
+        assert!(!is_official_openai_connection(&connection(
+            "http://api.openai.com/v1"
+        )));
+        assert!(!is_official_openai_connection(&connection(
+            "https://openrouter.ai/api/v1"
+        )));
     }
 
     #[test]

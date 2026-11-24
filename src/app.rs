@@ -1119,6 +1119,22 @@ impl App {
                 .any(|connection| connection.id == provider && !connection.model.is_empty())
     }
 
+    fn assistant_transcription_connection(&self) -> Option<crate::settings::AssistantConnection> {
+        let id = self
+            .account()
+            .settings
+            .assistant_voice_transcription
+            .as_ref()?;
+        self.settings
+            .assistant_connections
+            .iter()
+            .find(|connection| {
+                connection.id == *id
+                    && crate::assistant_api::is_official_openai_connection(connection)
+            })
+            .cloned()
+    }
+
     fn send_assistant_provider_to_accounts(&self) {
         let provider = self.settings.assistant_provider.clone();
         let connection = self
@@ -3801,11 +3817,7 @@ impl App {
 
     fn apply_backend_event(&mut self, event: Event, live: bool) {
         match event {
-            Event::PluginMessageReceived {
-                chat,
-                message,
-                text,
-            } => {
+            Event::AssistantMessageReceived { chat, message } => {
                 let assistant_eligible = self.settings.assistant_enabled
                     && self.assistant_provider_available()
                     && crate::model::ChatKind::from_id(&chat) == crate::model::ChatKind::Direct
@@ -3823,10 +3835,17 @@ impl App {
                     });
                 if assistant_eligible {
                     self.backend.send(Command::AssistantIncoming {
-                        chat: chat.clone(),
-                        message: message.clone(),
+                        chat,
+                        message,
+                        transcription: self.assistant_transcription_connection(),
                     });
                 }
+            }
+            Event::PluginMessageReceived {
+                chat,
+                message,
+                text,
+            } => {
                 let generation = self.account().plugin_generation;
                 for plugin in &self.account().settings.enabled_plugins {
                     if !self
@@ -9925,6 +9944,26 @@ impl App {
                         self.settings.assistant_enabled = false;
                         self.settings_dirty = true;
                     }
+                }
+            }
+            Action::SetAssistantVoiceTranscription(connection) => {
+                let valid = connection.as_ref().is_none_or(|id| {
+                    self.settings.assistant_connections.iter().any(|candidate| {
+                        candidate.id == *id
+                            && crate::assistant_api::is_official_openai_connection(candidate)
+                    })
+                });
+                if !valid {
+                    self.toast_error(
+                        "Voice transcription requires a saved official OpenAI API connection.",
+                    );
+                } else if self.account().settings.assistant_voice_transcription != connection {
+                    let account = self.account_mut();
+                    account.settings.assistant_voice_transcription = connection;
+                    account.mark_settings_dirty();
+                    account
+                        .backend
+                        .send(Command::CancelAssistant { chat: None });
                 }
             }
             Action::SetAssistantChat { chat, enabled } => {

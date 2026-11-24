@@ -40,6 +40,18 @@ impl Pending {
         }
     }
 
+    /// Adds work without moving an existing batch's quiet-period deadline.
+    /// Used when a prerequisite, such as downloading an attachment, settles.
+    pub fn push_ready(&mut self, chat: &str, message: &str, now: Instant) {
+        let batch = self.chats.entry(chat.to_owned()).or_insert_with(|| Batch {
+            deadline: now,
+            messages: Vec::new(),
+        });
+        if !batch.messages.iter().any(|id| id == message) {
+            batch.messages.push(message.to_owned());
+        }
+    }
+
     /// Cancel work on explicit chat opt-out.
     pub fn cancel(&mut self, chat: &str) {
         self.chats.remove(chat);
@@ -103,5 +115,16 @@ mod tests {
         first.push("a", "four", now, Duration::ZERO);
         first.clear();
         assert!(first.take_due(now).is_empty());
+    }
+
+    #[test]
+    fn ready_work_does_not_shorten_a_newer_message_quiet_period() {
+        let now = Instant::now();
+        let mut pending = Pending::default();
+        pending.push("a", "new", now, Duration::from_secs(30));
+        pending.push_ready("a", "downloaded", now + Duration::from_secs(1));
+        assert!(pending.take_due(now + Duration::from_secs(29)).is_empty());
+        let due = pending.take_due(now + Duration::from_secs(30));
+        assert_eq!(due[0].messages, ["new", "downloaded"]);
     }
 }

@@ -2732,6 +2732,7 @@ pub enum Action {
         base_url: String,
     },
     SetAssistantEnabled(bool),
+    SetAssistantVoiceTranscription(Option<String>),
     SetAssistantChat {
         chat: ChatId,
         enabled: bool,

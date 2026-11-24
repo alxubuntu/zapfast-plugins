@@ -9,6 +9,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use anyhow::Context;
 use tokio::sync::{mpsc, oneshot};
 use whatsapp_rust::download::MediaType;
 use whatsapp_rust::features::PresencePolicy;
@@ -813,6 +814,23 @@ fn assistant_message_text(content: &Content) -> Option<String> {
     (!text.is_empty()).then(|| text.chars().take(8_000).collect())
 }
 
+fn assistant_voice_note(content: &Content) -> Option<(&crate::model::Media, Option<u32>)> {
+    match content {
+        Content::Audio {
+            media,
+            seconds,
+            voice_note: true,
+            ..
+        } => Some((media, *seconds)),
+        _ => None,
+    }
+}
+
+enum AssistantIncomingPart {
+    Text(String),
+    Voice { message: String, path: PathBuf },
+}
+
 fn truncate_utf8(text: &mut String, max_bytes: usize) {
     if text.len() > max_bytes {
         let mut boundary = max_bytes;
@@ -1011,6 +1029,8 @@ pub async fn run(
         assistant_batches: Default::default(),
         assistant_cancel: HashMap::new(),
         assistant_generation: HashMap::new(),
+        assistant_transcription: HashMap::new(),
+        assistant_waiting_voice: HashMap::new(),
         privacy_ready: privacy_confirmed,
         privacy_confirmed,
         privacy_snapshot,
@@ -1306,25 +1326,49 @@ impl Worker {
                     prompt.push('\n');
                 }
             }
+            truncate_utf8(&mut prompt, 16 * 1024);
             let mut incoming = Vec::new();
+            let transcription = self.assistant_transcription.get(&batch.chat).cloned();
+            let mut waiting_for_voice = false;
             for id in &batch.messages {
                 if let Ok(Some(message)) = self.archive.message(&batch.chat, id)
                     && !message.from_me
-                    && let Some(text) = assistant_message_text(&message.content)
                 {
-                    incoming.push(text);
+                    if let Some(text) = assistant_message_text(&message.content) {
+                        incoming.push(AssistantIncomingPart::Text(text));
+                    } else if let (Some(_connection), Some((media, seconds))) =
+                        (&transcription, assistant_voice_note(&message.content))
+                    {
+                        if seconds.is_some_and(|seconds| seconds > 300) {
+                            self.emit(Event::Error(
+                                "Voice note transcription is limited to five minutes.".into(),
+                            ));
+                            continue;
+                        }
+                        if media.size > 4 * 1024 * 1024 {
+                            self.emit(Event::Error(
+                                "Voice note transcription is limited to four MiB.".into(),
+                            ));
+                            continue;
+                        }
+                        if let Some(path) = media.path.as_ref().filter(|path| path.is_file()) {
+                            incoming.push(AssistantIncomingPart::Voice {
+                                message: id.clone(),
+                                path: path.clone(),
+                            });
+                        } else {
+                            self.assistant_waiting_voice
+                                .insert((batch.chat.clone(), id.clone()), batch.messages.clone());
+                            self.download_media(batch.chat.clone(), id.clone(), None, false);
+                            waiting_for_voice = true;
+                        }
+                    }
                 }
             }
-            if incoming.is_empty() {
+            if waiting_for_voice || incoming.is_empty() {
                 continue;
             }
             prompt.push_str("\nNew messages:\n");
-            for text in incoming {
-                prompt.push_str("Contact: ");
-                prompt.push_str(&text);
-                prompt.push('\n');
-            }
-            truncate_utf8(&mut prompt, 32 * 1024);
             let generation = self
                 .assistant_generation
                 .entry(batch.chat.clone())
@@ -1341,6 +1385,8 @@ impl Worker {
             let chat = batch.chat;
             let provider = self.assistant_provider.clone();
             let connection = self.assistant_connection.clone();
+            let transcription =
+                transcription.filter(crate::assistant_api::is_official_openai_connection);
             tokio::spawn(async move {
                 let result = tokio::select! {
                     changed = cancel.changed() => {
@@ -1348,6 +1394,39 @@ impl Worker {
                         return;
                     }
                     result = async {
+                        for part in incoming {
+                            match part {
+                                AssistantIncomingPart::Text(text) => {
+                                    prompt.push_str("Contact: ");
+                                    prompt.push_str(&text);
+                                    prompt.push('\n');
+                                }
+                                AssistantIncomingPart::Voice { message, path } => {
+                                    let bytes = tokio::fs::read(&path)
+                                        .await
+                                        .context("read downloaded voice note")?;
+                                    let wav = tokio::task::spawn_blocking(move || {
+                                        crate::voice::transcription_wav(&bytes)
+                                    })
+                                    .await
+                                    .context("prepare voice note for transcription")?
+                                    .map_err(anyhow::Error::msg)?;
+                                    let transcription_connection = transcription
+                                        .as_ref()
+                                        .context("voice transcription is not configured")?;
+                                    let text = crate::assistant_api::transcribe_openai(
+                                        &transcription_connection.id,
+                                        &transcription_connection.base_url,
+                                        wav,
+                                    )
+                                    .await?;
+                                    prompt.push_str(&format!(
+                                        "Contact voice note (message {message}, transcribed): {text}\n"
+                                    ));
+                                }
+                            }
+                            truncate_utf8(&mut prompt, 32 * 1024);
+                        }
                         if provider == "chatgpt" {
                             crate::chatgpt::draft(&prompt, None).await
                         } else if let Some(connection) = connection {
@@ -1645,6 +1724,8 @@ struct Worker {
     assistant_batches: zapfast_plugin_host_core::batching::Pending,
     assistant_cancel: HashMap<ChatId, tokio::sync::watch::Sender<u64>>,
     assistant_generation: HashMap<ChatId, u64>,
+    assistant_transcription: HashMap<ChatId, crate::settings::AssistantConnection>,
+    assistant_waiting_voice: HashMap<(ChatId, String), Vec<String>>,
     /// Private content may reach the UI.
     privacy_ready: bool,
     /// Phone lock state is known to be mirrored in the archive.
@@ -6330,6 +6411,12 @@ impl Worker {
             self.prefetch.touch();
         }
         self.emit_chat(&chat);
+        if incoming.is_some() {
+            self.emit(Event::AssistantMessageReceived {
+                chat: chat.clone(),
+                message: message_id.clone(),
+            });
+        }
         // The window's eligibility check needs the updated unread count.
         if let Some(text) = plugin_text {
             self.emit(Event::PluginMessageReceived {
@@ -7521,6 +7608,8 @@ impl Worker {
                 connection,
             } => {
                 self.assistant_batches.clear();
+                self.assistant_waiting_voice.clear();
+                self.assistant_transcription.clear();
                 self.assistant_provider = provider;
                 self.assistant_connection = connection;
                 for (chat, cancel) in &self.assistant_cancel {
@@ -7578,7 +7667,11 @@ impl Worker {
                     waker.wake();
                 });
             }
-            Command::AssistantIncoming { chat, message } => {
+            Command::AssistantIncoming {
+                chat,
+                message,
+                transcription,
+            } => {
                 if crate::model::ChatKind::from_id(&chat) == crate::model::ChatKind::Direct
                     && self
                         .archive
@@ -7587,6 +7680,12 @@ impl Worker {
                         .flatten()
                         .is_some_and(|record| !record.locked)
                 {
+                    if let Some(connection) = transcription {
+                        self.assistant_transcription
+                            .insert(chat.clone(), connection);
+                    } else {
+                        self.assistant_transcription.remove(&chat);
+                    }
                     let generation = self
                         .assistant_generation
                         .entry(chat.clone())
@@ -7605,6 +7704,9 @@ impl Worker {
             }
             Command::CancelAssistant { chat: Some(chat) } => {
                 self.assistant_batches.cancel(&chat);
+                self.assistant_transcription.remove(&chat);
+                self.assistant_waiting_voice
+                    .retain(|(waiting_chat, _), _| waiting_chat != &chat);
                 let generation = self
                     .assistant_generation
                     .entry(chat.clone())
@@ -7616,6 +7718,8 @@ impl Worker {
             }
             Command::CancelAssistant { chat: None } => {
                 self.assistant_batches.clear();
+                self.assistant_waiting_voice.clear();
+                self.assistant_transcription.clear();
                 for (chat, cancel) in &self.assistant_cancel {
                     let generation = self
                         .assistant_generation
@@ -11157,6 +11261,13 @@ impl Worker {
         result: Result<PathBuf, String>,
     ) {
         self.downloads.remove(&(chat.clone(), id.clone(), card));
+        let assistant_retry = card
+            .is_none()
+            .then(|| {
+                self.assistant_waiting_voice
+                    .remove(&(chat.clone(), id.clone()))
+            })
+            .flatten();
         let key = (chat.clone(), id.clone());
         let for_picker = self.sticker_downloads.remove(&key);
         let clicked = self.sticker_clicked.remove(&key);
@@ -11192,6 +11303,18 @@ impl Worker {
                 .insert((chat.clone(), id.clone()));
         }
         let result_ok = result.is_ok();
+        if let Some(messages) = assistant_retry {
+            if result_ok {
+                for message in messages {
+                    self.assistant_batches
+                        .push_ready(&chat, &message, Instant::now());
+                }
+            } else {
+                self.emit(Event::Error(
+                    "Could not download a voice note for assistant transcription.".into(),
+                ));
+            }
+        }
         self.emit(Event::Media {
             card,
             chat,
@@ -15375,6 +15498,34 @@ mod tests {
         truncate_utf8(&mut text, 10);
         assert_eq!(text, "aaaaaaaaa");
         assert!(text.is_char_boundary(text.len()));
+    }
+
+    #[test]
+    fn assistant_transcribes_voice_notes_but_not_other_audio_attachments() {
+        let media = || crate::model::Media {
+            mime: "audio/ogg".into(),
+            size: 0,
+            width: None,
+            height: None,
+            album: None,
+            path: None,
+            state: crate::model::MediaState::Idle,
+        };
+        let voice = Content::Audio {
+            media: media(),
+            seconds: Some(12),
+            voice_note: true,
+            waveform: Vec::new(),
+        };
+        let attachment = Content::Audio {
+            media: media(),
+            seconds: Some(12),
+            voice_note: false,
+            waveform: Vec::new(),
+        };
+        assert!(assistant_voice_note(&voice).is_some());
+        assert!(assistant_voice_note(&attachment).is_none());
+        assert!(assistant_message_text(&voice).is_none());
     }
 
     #[tokio::test]
@@ -20903,6 +21054,8 @@ mod receipt_tests {
             assistant_batches: Default::default(),
             assistant_cancel: HashMap::new(),
             assistant_generation: HashMap::new(),
+            assistant_transcription: HashMap::new(),
+            assistant_waiting_voice: HashMap::new(),
             privacy_ready: true,
             privacy_confirmed: true,
             privacy_snapshot: false,

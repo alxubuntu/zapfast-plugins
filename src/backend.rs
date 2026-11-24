@@ -186,6 +186,7 @@ pub enum Command {
     AssistantIncoming {
         chat: ChatId,
         message: String,
+        transcription: Option<crate::settings::AssistantConnection>,
     },
     CancelAssistant {
         chat: Option<ChatId>,
@@ -1340,6 +1341,12 @@ pub enum Event {
         chat: ChatId,
         message: String,
         text: String,
+    },
+    /// Live incoming message candidate for the private assistant flow. This
+    /// carries no body and is separate from the explicitly opted-in plugin API.
+    AssistantMessageReceived {
+        chat: ChatId,
+        message: String,
     },
     /// The starred messages of one chat, for the mark in the conversation.
     Stars {

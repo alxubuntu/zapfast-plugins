@@ -58,15 +58,30 @@ assistant globally or for that chat does.
 
 To draft a reply, ZapFast sends the selected provider the textual contents of up to 32 local
 messages from the previous seven days and the new incoming text. Text captions
-on images, videos, and documents may be included; media files, phone numbers
-as separate metadata, contacts, and other chats are not included. This context
-can contain personal information. The selected provider processes it under
-that provider's applicable terms, privacy policy, and usage limits. ZapFast
-does not separately add phone-number metadata or contact records. ChatGPT
-sign-in uses the signed-in account's available model catalog and Responses API
-with `store: false` and streaming; compatible API connections use the chosen
-model with `POST /chat/completions`. A failed request is reported, not routed
-to another provider.
+on images, videos, and documents may be included. By default, media files,
+phone numbers as separate metadata, contacts, and other chats are not included.
+This context can contain personal information. The selected provider processes
+it under that provider's applicable terms, privacy policy, and usage limits.
+ZapFast does not separately add phone-number metadata or contact records.
+
+Voice-note transcription is off by default and is configured per account under
+Settings → Plugins. Selecting a saved connection whose host is exactly
+`api.openai.com` enables transcription for eligible incoming voice notes in
+that account. This explicitly sends the audio to the OpenAI audio
+transcriptions API using the saved API key, then may send the resulting text
+to the selected reply provider. Only WhatsApp voice notes are considered,
+not other audio attachments. Notes longer than five minutes, source files over
+four MiB, downloads that exceed the normal automatic attachment limit,
+unsupported or invalid audio, and transcription requests over 25 MiB are not
+transcribed. The audio is converted locally from OGG/Opus to 16 kHz WAV before
+upload. ZapFast does not log or
+store the transcription as a separate record. Review OpenAI's API terms,
+privacy policy, and data controls before enabling this setting.
+
+ChatGPT sign-in uses the signed-in account's available model catalog and
+Responses API with `store: false` and streaming; compatible API connections use
+the chosen model with `POST /chat/completions`. A failed request is reported,
+not routed to another provider.
 
 Generated replies are proposals only. ZapFast never sends them automatically,
 and will not apply one over user-written or edited text, or attachments.

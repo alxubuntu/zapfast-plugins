@@ -1009,6 +1009,50 @@ fn sections(app: &App) -> Vec<Section> {
             }
         },
     );
+    let voice_connection = app.account().settings.assistant_voice_transcription.clone();
+    let openai_connections: Vec<_> = app
+        .settings
+        .assistant_connections
+        .iter()
+        .filter(|connection| crate::assistant_api::is_official_openai_connection(connection))
+        .cloned()
+        .collect();
+    plugins.row(
+        "Transcribe voice notes for drafts",
+        "When enabled, incoming voice notes in eligible chats are sent to OpenAI for transcription. The transcript may then be sent to your selected reply provider.",
+        move |ui, app| {
+            egui::ComboBox::from_id_salt("assistant-voice-transcription")
+                .selected_text(
+                    voice_connection
+                        .as_ref()
+                        .and_then(|id| openai_connections.iter().find(|item| &item.id == id))
+                        .map(|item| item.name.as_str())
+                        .unwrap_or("Off"),
+                )
+                .show_ui(ui, |ui| {
+                    if ui
+                        .selectable_label(voice_connection.is_none(), "Off")
+                        .clicked()
+                    {
+                        app.actions
+                            .push(Action::SetAssistantVoiceTranscription(None));
+                    }
+                    for connection in &openai_connections {
+                        if ui
+                            .selectable_label(
+                                voice_connection.as_ref() == Some(&connection.id),
+                                &connection.name,
+                            )
+                            .clicked()
+                        {
+                            app.actions.push(Action::SetAssistantVoiceTranscription(Some(
+                                connection.id.clone(),
+                            )));
+                        }
+                    }
+                });
+        },
+    );
     for plugin in &app.account().plugins {
         let id = plugin.id.clone();
         let enabled = app.account().settings.enabled_plugins.contains(&id);

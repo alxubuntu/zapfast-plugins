@@ -6,6 +6,9 @@ use std::io::Cursor;
 
 /// Opus sample rate used for every mono clip.
 pub const RATE: u32 = 48_000;
+/// Transcription WAV sample rate, reduced locally to keep files compact.
+const TRANSCRIPTION_RATE: u32 = 16_000;
+const MAX_TRANSCRIPTION_SOURCE_BYTES: usize = 4 * 1024 * 1024;
 /// One Opus frame: 20 ms.
 const FRAME: usize = 960;
 /// Maximum decoded Opus packet size: 120 ms of stereo.
@@ -61,6 +64,47 @@ pub fn decode(bytes: &[u8]) -> Result<Vec<f32>, String> {
         return Err("not an OGG stream".to_owned());
     }
     Ok(out)
+}
+
+/// Converts WhatsApp's OGG/Opus voice note to a mono 16-bit PCM WAV file,
+/// the format accepted by OpenAI's audio transcription endpoint.
+pub fn transcription_wav(bytes: &[u8]) -> Result<Vec<u8>, String> {
+    if bytes.len() > MAX_TRANSCRIPTION_SOURCE_BYTES {
+        return Err("voice note exceeds the four MiB transcription source limit".to_owned());
+    }
+    let samples = decode(bytes)?;
+    if samples.len() > RATE as usize * 300 {
+        return Err("voice note exceeds the five-minute transcription limit".to_owned());
+    }
+    let samples: Vec<f32> = samples
+        .as_chunks::<3>()
+        .0
+        .iter()
+        .map(|chunk| (chunk[0] + chunk[1] + chunk[2]) / 3.0)
+        .collect();
+    let data_len = samples
+        .len()
+        .checked_mul(2)
+        .and_then(|len| u32::try_from(len).ok())
+        .ok_or_else(|| "voice note is too long to transcribe".to_owned())?;
+    let mut wav = Vec::with_capacity(44 + data_len as usize);
+    wav.extend_from_slice(b"RIFF");
+    wav.extend_from_slice(&(36u32 + data_len).to_le_bytes());
+    wav.extend_from_slice(b"WAVEfmt ");
+    wav.extend_from_slice(&16u32.to_le_bytes());
+    wav.extend_from_slice(&1u16.to_le_bytes());
+    wav.extend_from_slice(&1u16.to_le_bytes());
+    wav.extend_from_slice(&TRANSCRIPTION_RATE.to_le_bytes());
+    wav.extend_from_slice(&(TRANSCRIPTION_RATE * 2).to_le_bytes());
+    wav.extend_from_slice(&2u16.to_le_bytes());
+    wav.extend_from_slice(&16u16.to_le_bytes());
+    wav.extend_from_slice(b"data");
+    wav.extend_from_slice(&data_len.to_le_bytes());
+    for sample in samples {
+        let sample = (sample.clamp(-1.0, 1.0) * i16::MAX as f32).round() as i16;
+        wav.extend_from_slice(&sample.to_le_bytes());
+    }
+    Ok(wav)
 }
 
 /// The OGG file without the beginning-of-stream pages that repeat one of
@@ -285,6 +329,25 @@ mod tests {
         (0..(RATE as f32 * seconds) as usize)
             .map(|i| (i as f32 * 440.0 * std::f32::consts::TAU / RATE as f32).sin() * 0.5)
             .collect()
+    }
+
+    #[test]
+    fn transcription_wav_is_mono_pcm16() {
+        let source = encode(&vec![0.0; FRAME]).expect("encode voice");
+        let wav = transcription_wav(&source).expect("convert to WAV");
+        assert_eq!(&wav[..4], b"RIFF");
+        assert_eq!(&wav[8..16], b"WAVEfmt ");
+        assert_eq!(u16::from_le_bytes([wav[22], wav[23]]), 1);
+        assert_eq!(
+            u32::from_le_bytes(wav[24..28].try_into().unwrap()),
+            TRANSCRIPTION_RATE
+        );
+        assert_eq!(u16::from_le_bytes([wav[34], wav[35]]), 16);
+        assert_eq!(&wav[36..40], b"data");
+        assert_eq!(
+            u32::from_le_bytes(wav[40..44].try_into().unwrap()) as usize,
+            wav.len() - 44
+        );
     }
 
     fn rms(samples: &[f32]) -> f32 {

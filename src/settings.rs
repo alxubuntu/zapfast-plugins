@@ -850,6 +850,10 @@ pub struct AccountSettings {
     /// Direct chats excluded from the OpenAI assistant for this account.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub assistant_disabled_chats: Vec<String>,
+    /// OpenAI API connection explicitly allowed to transcribe incoming voice
+    /// notes for this account. `None` keeps voice transcription disabled.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub assistant_voice_transcription: Option<String>,
     pub send_read_receipts: bool,
     pub send_typing: bool,
     #[serde(alias = "auto_download_images")]
@@ -879,6 +883,7 @@ impl Default for AccountSettings {
             enabled_plugins: Vec::new(),
             plugin_chats: std::collections::BTreeMap::new(),
             assistant_disabled_chats: Vec::new(),
+            assistant_voice_transcription: None,
             send_read_receipts: true,
             send_typing: true,
             auto_download: true,
@@ -900,6 +905,7 @@ impl AccountSettings {
             enabled_plugins: Vec::new(),
             plugin_chats: std::collections::BTreeMap::new(),
             assistant_disabled_chats: Vec::new(),
+            assistant_voice_transcription: None,
             send_read_receipts: settings.send_read_receipts,
             send_typing: settings.send_typing,
             auto_download: settings.auto_download,
@@ -1390,6 +1396,7 @@ mod tests {
     fn plugin_chat_opt_in_is_saved_per_account_and_old_settings_default_empty() {
         let legacy: AccountSettings = serde_json::from_str(r#"{"notifications":true}"#).unwrap();
         assert!(legacy.plugin_chats.is_empty());
+        assert!(legacy.assistant_voice_transcription.is_none());
         let settings = AccountSettings {
             enabled_plugins: vec!["org.example.reply".into()],
             plugin_chats: [(
@@ -1397,6 +1404,7 @@ mod tests {
                 vec!["123@s.whatsapp.net".into()],
             )]
             .into(),
+            assistant_voice_transcription: Some("openai-key".into()),
             ..AccountSettings::default()
         };
         let encoded = serde_json::to_string(&settings).unwrap();
