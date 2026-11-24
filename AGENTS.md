@@ -13,7 +13,9 @@ protocol. These notes are for coding agents and new contributors.
   and account restrictions may apply to automation.
 - When the user asks for a ZIP deliverable, package the Windows executable
   with its required runtime DLLs, not a source archive. Preserve any existing
-  ZIP and give the new package its own name.
+  ZIP and give the new package its own name. For every implementation task,
+  build the Windows executable, upload the complete executable-and-DLL ZIP to
+  GitHub, and provide the ZIP to the user.
 - Plugin installation stages files and atomically renames the directory into
   place (`plugins/host-core/src/lib.rs`). Close every handle to staged files
   before the rename: on Windows, open executable or manifest handles can
