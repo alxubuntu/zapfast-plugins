@@ -410,6 +410,8 @@ pub struct Settings {
     /// OpenAI assistant master switch. Off until the privacy notice is
     /// explicitly accepted; when on it considers unread direct chats by default.
     pub assistant_enabled: bool,
+    /// Restrict assistant drafts to the single local assistant.txt file.
+    pub assistant_knowledge_only: bool,
     /// Selected assistant backend: "chatgpt" or a configured API connection ID.
     pub assistant_provider: String,
     /// Non-secret metadata for compatible OpenAI API connections. Keys live
@@ -571,6 +573,7 @@ impl Default for Settings {
         Self {
             version: SETTINGS_VERSION,
             assistant_enabled: false,
+            assistant_knowledge_only: false,
             assistant_provider: "chatgpt".into(),
             assistant_connections: Vec::new(),
             theme: ThemeChoice::System,

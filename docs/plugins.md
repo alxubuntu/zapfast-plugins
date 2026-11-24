@@ -93,6 +93,25 @@ is saved as that chat's local draft. Uninstalling a native plugin removes its
 files, account settings, and per-chat permissions, but preserves messages and
 drafts.
 
+### Knowledge-only replies
+
+Knowledge-only replies are optional and off by default. Enable them in
+Settings → Plugins, then use **Create template** for the shared
+`assistant.txt` file in ZapFast's state directory. Edit that one file with the
+assistant's identity, allowed topics, authorized facts, tone, and fallback
+answer. **Open file** launches it in the operating system's associated text
+editor. The file is limited to 64 KiB of UTF-8 text.
+
+When enabled, the file is sent to the selected provider with the eligible chat
+context. The assistant is instructed to use only facts in the file and to use
+its fallback when information is absent or outside scope. If the file is
+missing, empty, invalid, or too large, no draft request is sent. The existing
+assistant behavior is unchanged while this option is off.
+
+This is model-level grounding, not a technical proof that generated prose
+contains no unsupported claim. Review drafts before using them. Do not put
+secrets in the file; it is sent to the selected provider along with chat text.
+
 On Windows, ZapFast Plugins uses its own application and instance identity
 and separate configuration, account and cache folders from ZapFast. It does
 not import the original application's data; link an account separately.

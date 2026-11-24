@@ -1009,6 +1009,39 @@ fn sections(app: &App) -> Vec<Section> {
             }
         },
     );
+    let knowledge_only = app.settings.assistant_knowledge_only;
+    plugins.row(
+        "Knowledge-only replies",
+        "Sends assistant.txt to the selected provider and instructs the model to use only its facts. Missing or invalid files stop generation; model compliance is not guaranteed.",
+        move |ui, app| {
+            if theme::soft_button(
+                ui,
+                &palette,
+                None,
+                if knowledge_only { "Disable" } else { "Enable" },
+                false,
+            )
+            .clicked()
+            {
+                app.actions
+                    .push(Action::SetAssistantKnowledgeOnly(!knowledge_only));
+            }
+        },
+    );
+    plugins.row(
+        "Assistant knowledge file",
+        app.dirs.assistant_knowledge_file().display().to_string(),
+        move |ui, app| {
+            ui.horizontal_wrapped(|ui| {
+                if theme::soft_button(ui, &palette, None, "Create template", false).clicked() {
+                    app.actions.push(Action::InitializeAssistantKnowledge);
+                }
+                if theme::soft_button(ui, &palette, None, "Open file", false).clicked() {
+                    app.actions.push(Action::OpenAssistantKnowledge);
+                }
+            });
+        },
+    );
     let voice_connection = app.account().settings.assistant_voice_transcription.clone();
     let openai_connections: Vec<_> = app
         .settings

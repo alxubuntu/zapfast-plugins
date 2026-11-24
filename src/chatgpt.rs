@@ -332,7 +332,11 @@ async fn refresh(credentials: &mut Credentials, http: &reqwest::Client) -> Resul
 
 /// Complete an OpenAI Responses API request using a validated ChatGPT-plan
 /// credential. Only returns a draft candidate after `response.completed`.
-pub async fn draft(prompt: &str, model: Option<&str>) -> Result<String> {
+pub async fn draft(
+    prompt: &str,
+    model: Option<&str>,
+    instructions: Option<&str>,
+) -> Result<String> {
     let mut credentials = blocking(connection)
         .await?
         .context("Connect ChatGPT in Settings first")?;
@@ -377,7 +381,7 @@ pub async fn draft(prompt: &str, model: Option<&str>) -> Result<String> {
         .header(reqwest::header::CONTENT_TYPE, "application/json")
         .body(serde_json::to_vec(&serde_json::json!({
             "model": selected_model,
-            "instructions": "Draft a concise, natural reply to the user. Never claim to have sent it. Output only the proposed message.",
+            "instructions": instructions.unwrap_or("Draft a concise, natural reply to the user. Never claim to have sent it. Output only the proposed message."),
             "input": [{"role":"user","content":prompt}],
             "store": false,
             "stream": true

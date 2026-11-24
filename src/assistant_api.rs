@@ -128,7 +128,13 @@ fn parse_models(response: &serde_json::Value) -> Result<Vec<String>> {
     Ok(models)
 }
 
-pub async fn draft(id: &str, base: &str, model: &str, prompt: &str) -> Result<String> {
+pub async fn draft(
+    id: &str,
+    base: &str,
+    model: &str,
+    prompt: &str,
+    instructions: Option<&str>,
+) -> Result<String> {
     let key = tokio::task::spawn_blocking({
         let id = id.to_owned();
         move || load_key(&id)
@@ -141,7 +147,7 @@ pub async fn draft(id: &str, base: &str, model: &str, prompt: &str) -> Result<St
         .json(&serde_json::json!({
             "model": model,
             "messages": [
-                {"role":"system","content":"Draft a concise, natural reply. Never claim to have sent it. Output only the proposed message."},
+                {"role":"system","content":instructions.unwrap_or("Draft a concise, natural reply. Never claim to have sent it. Output only the proposed message.")},
                 {"role":"user","content":prompt}
             ],
             "stream": false

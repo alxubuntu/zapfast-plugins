@@ -10,6 +10,7 @@ pub mod app_lock;
 pub mod appearance;
 pub mod archive;
 pub(crate) mod assistant_api;
+pub mod assistant_knowledge;
 pub mod audio;
 pub mod autostart;
 pub mod backdrop;

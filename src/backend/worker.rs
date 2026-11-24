@@ -1026,6 +1026,8 @@ pub async fn run(
     let mut worker = Worker {
         assistant_provider: "chatgpt".into(),
         assistant_connection: None,
+        assistant_knowledge_only: false,
+        assistant_knowledge_path: PathBuf::new(),
         assistant_batches: Default::default(),
         assistant_cancel: HashMap::new(),
         assistant_generation: HashMap::new(),
@@ -1294,6 +1296,19 @@ impl Worker {
             if chat.locked {
                 continue;
             }
+            let knowledge_instructions = if self.assistant_knowledge_only {
+                match crate::assistant_knowledge::read(&self.assistant_knowledge_path) {
+                    Ok(knowledge) => Some(crate::assistant_knowledge::instructions(&knowledge)),
+                    Err(_) => {
+                        self.emit(Event::Error(
+                            "The assistant knowledge file is missing, empty, invalid, or too large. Check it in Settings → Plugins.".into(),
+                        ));
+                        continue;
+                    }
+                }
+            } else {
+                None
+            };
             let Some(latest) = batch
                 .messages
                 .iter()
@@ -1385,6 +1400,7 @@ impl Worker {
             let chat = batch.chat;
             let provider = self.assistant_provider.clone();
             let connection = self.assistant_connection.clone();
+            let knowledge_instructions = knowledge_instructions.clone();
             let transcription =
                 transcription.filter(crate::assistant_api::is_official_openai_connection);
             tokio::spawn(async move {
@@ -1428,13 +1444,19 @@ impl Worker {
                             truncate_utf8(&mut prompt, 32 * 1024);
                         }
                         if provider == "chatgpt" {
-                            crate::chatgpt::draft(&prompt, None).await
+                            crate::chatgpt::draft(
+                                &prompt,
+                                None,
+                                knowledge_instructions.as_deref(),
+                            )
+                            .await
                         } else if let Some(connection) = connection {
                             crate::assistant_api::draft(
                                 &connection.id,
                                 &connection.base_url,
                                 &connection.model,
                                 &prompt,
+                                knowledge_instructions.as_deref(),
                             ).await
                         } else {
                             anyhow::bail!("Selected API connection is not configured")
@@ -1721,6 +1743,8 @@ enum AwaitingAck {
 struct Worker {
     assistant_provider: String,
     assistant_connection: Option<crate::settings::AssistantConnection>,
+    assistant_knowledge_only: bool,
+    assistant_knowledge_path: PathBuf,
     assistant_batches: zapfast_plugin_host_core::batching::Pending,
     assistant_cancel: HashMap<ChatId, tokio::sync::watch::Sender<u64>>,
     assistant_generation: HashMap<ChatId, u64>,
@@ -7671,6 +7695,8 @@ impl Worker {
                 chat,
                 message,
                 transcription,
+                knowledge_only,
+                knowledge_path,
             } => {
                 if crate::model::ChatKind::from_id(&chat) == crate::model::ChatKind::Direct
                     && self
@@ -7680,6 +7706,8 @@ impl Worker {
                         .flatten()
                         .is_some_and(|record| !record.locked)
                 {
+                    self.assistant_knowledge_only = knowledge_only;
+                    self.assistant_knowledge_path = knowledge_path;
                     if let Some(connection) = transcription {
                         self.assistant_transcription
                             .insert(chat.clone(), connection);
@@ -21051,6 +21079,8 @@ mod receipt_tests {
         let worker = Worker {
             assistant_provider: "chatgpt".into(),
             assistant_connection: None,
+            assistant_knowledge_only: false,
+            assistant_knowledge_path: PathBuf::new(),
             assistant_batches: Default::default(),
             assistant_cancel: HashMap::new(),
             assistant_generation: HashMap::new(),

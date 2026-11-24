@@ -99,6 +99,11 @@ impl AppDirs {
         self.config.join("settings.json")
     }
 
+    /// Shared assistant knowledge file, independent of the active account.
+    pub fn assistant_knowledge_file(&self) -> PathBuf {
+        crate::assistant_knowledge::path(&self.state)
+    }
+
     /// Ordered list of account ids and the active one.
     pub fn accounts_file(&self) -> PathBuf {
         self.config.join("accounts.json")

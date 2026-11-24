@@ -187,6 +187,8 @@ pub enum Command {
         chat: ChatId,
         message: String,
         transcription: Option<crate::settings::AssistantConnection>,
+        knowledge_only: bool,
+        knowledge_path: std::path::PathBuf,
     },
     CancelAssistant {
         chat: Option<ChatId>,

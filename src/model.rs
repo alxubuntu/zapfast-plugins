@@ -2732,6 +2732,9 @@ pub enum Action {
         base_url: String,
     },
     SetAssistantEnabled(bool),
+    SetAssistantKnowledgeOnly(bool),
+    InitializeAssistantKnowledge,
+    OpenAssistantKnowledge,
     SetAssistantVoiceTranscription(Option<String>),
     SetAssistantChat {
         chat: ChatId,

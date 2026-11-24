@@ -3838,6 +3838,8 @@ impl App {
                         chat,
                         message,
                         transcription: self.assistant_transcription_connection(),
+                        knowledge_only: self.settings.assistant_knowledge_only,
+                        knowledge_path: self.dirs.assistant_knowledge_file(),
                     });
                 }
             }
@@ -9944,6 +9946,34 @@ impl App {
                         self.settings.assistant_enabled = false;
                         self.settings_dirty = true;
                     }
+                }
+            }
+            Action::SetAssistantKnowledgeOnly(enabled) => {
+                if self.settings.assistant_knowledge_only != enabled {
+                    self.settings.assistant_knowledge_only = enabled;
+                    self.settings_dirty = true;
+                    for account in &self.accounts {
+                        account
+                            .backend
+                            .send(Command::CancelAssistant { chat: None });
+                    }
+                }
+            }
+            Action::InitializeAssistantKnowledge => {
+                let path = self.dirs.assistant_knowledge_file();
+                match crate::assistant_knowledge::create_template(&path) {
+                    Ok(()) => self.toast("Assistant knowledge template is ready. Edit assistant.txt, then enable knowledge-only mode."),
+                    Err(error) => self.toast_error(format!("Could not create assistant knowledge file: {error}")),
+                }
+            }
+            Action::OpenAssistantKnowledge => {
+                let path = self.dirs.assistant_knowledge_file();
+                if path.is_file() {
+                    if let Err(error) = open::that_detached(&path) {
+                        self.toast_error(format!("Could not open assistant.txt: {error}"));
+                    }
+                } else {
+                    self.toast("Create assistant.txt first from Settings → Plugins.");
                 }
             }
             Action::SetAssistantVoiceTranscription(connection) => {
