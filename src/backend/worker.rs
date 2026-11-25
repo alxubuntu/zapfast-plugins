@@ -831,6 +831,19 @@ enum AssistantIncomingPart {
     Voice { message: String, path: PathBuf },
 }
 
+#[derive(Clone, Copy)]
+enum AssistantRunError {
+    License,
+    Denied,
+    Draft,
+}
+
+impl From<anyhow::Error> for AssistantRunError {
+    fn from(_: anyhow::Error) -> Self {
+        Self::Draft
+    }
+}
+
 fn truncate_utf8(text: &mut String, max_bytes: usize) {
     if text.len() > max_bytes {
         let mut boundary = max_bytes;
@@ -1290,6 +1303,14 @@ impl Worker {
             if crate::model::ChatKind::from_id(&batch.chat) != crate::model::ChatKind::Direct {
                 continue;
             }
+            let Some(phone) = self
+                .me_pn
+                .as_deref()
+                .and_then(crate::model::phone_of)
+                .map(str::to_owned)
+            else {
+                continue;
+            };
             let Ok(Some(chat)) = self.archive.chat(&batch.chat) else {
                 continue;
             };
@@ -1404,12 +1425,17 @@ impl Worker {
             let transcription =
                 transcription.filter(crate::assistant_api::is_official_openai_connection);
             tokio::spawn(async move {
-                let result = tokio::select! {
+                let result: Result<String, AssistantRunError> = tokio::select! {
                     changed = cancel.changed() => {
                         let _ = changed;
                         return;
                     }
                     result = async {
+                        match crate::license::check(&phone).await {
+                            Ok(true) => {}
+                            Ok(false) => return Err(AssistantRunError::Denied),
+                            Err(_) => return Err(AssistantRunError::License),
+                        }
                         for part in incoming {
                             match part {
                                 AssistantIncomingPart::Text(text) => {
@@ -1457,10 +1483,12 @@ impl Worker {
                                 &connection.model,
                                 &prompt,
                                 knowledge_instructions.as_deref(),
-                            ).await
+                            )
+                            .await
                         } else {
-                            anyhow::bail!("Selected API connection is not configured")
+                            return Err(AssistantRunError::Draft);
                         }
+                        .map_err(|_| AssistantRunError::Draft)
                     } => result,
                 };
                 if cancel.has_changed().unwrap_or(true) {
@@ -1471,7 +1499,19 @@ impl Worker {
                         let _ = events.send(Event::AssistantDraftReady { chat, text });
                         waker.wake();
                     }
-                    Err(_) => {
+                    Err(AssistantRunError::Denied) => {
+                        let _ = events.send(Event::Error(
+                            "The assistant is not licensed for this WhatsApp number.".into(),
+                        ));
+                        waker.wake();
+                    }
+                    Err(AssistantRunError::License) => {
+                        let _ = events.send(Event::Error(
+                            "Could not verify the assistant license. Check your internet connection and try again.".into(),
+                        ));
+                        waker.wake();
+                    }
+                    Err(AssistantRunError::Draft) => {
                         let _ = events.send(Event::Error(
                             "Could not generate an assistant draft. Check the selected provider, API key, model access, or usage limits.".into(),
                         ));

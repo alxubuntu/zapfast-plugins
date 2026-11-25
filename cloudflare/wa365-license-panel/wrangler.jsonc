@@ -1,0 +1,20 @@
+{
+  "name": "wa365-license-panel",
+  "main": "worker.js",
+  "compatibility_date": "2026-11-25",
+  "workers_dev": false,
+  "preview_urls": false,
+  "routes": [
+    {
+      "pattern": "wa365.automatiza365.com",
+      "custom_domain": true
+    }
+  ],
+  "d1_databases": [
+    {
+      "binding": "LICENSES",
+      "database_name": "zapfast-licenses",
+      "database_id": "ae597c7a-2e99-4d02-804b-56aaf5a0f89f"
+    }
+  ]
+}

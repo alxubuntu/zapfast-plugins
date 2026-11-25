@@ -34,6 +34,7 @@ pub mod group_admin;
 pub mod i18n;
 pub mod image_cache;
 pub mod image_preview;
+pub(crate) mod license;
 pub mod lottie;
 #[cfg(target_os = "macos")]
 pub mod macos;
