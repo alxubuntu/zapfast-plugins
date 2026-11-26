@@ -59,10 +59,12 @@ assistant globally or for that chat does.
 The assistant checks the linked account's phone number against the ZapFast
 license service before generating each draft. Only that phone number is sent
 to the license service; chat messages and drafts are not. A suspended, expired,
-or unregistered number cannot use the assistant. If the license service cannot
-be reached, generation stops and ZapFast reports that it could not verify the
-license; it does not treat a network error as an invalid license or send the
-conversation to the assistant provider.
+or unregistered number is denied immediately. After a valid online check,
+ZapFast keeps the service's signed confirmation in that account's state folder
+and may use it for up to 72 hours if the service cannot be reached. The grace
+period never extends past the license expiration date. An authenticated denial
+overrides any saved confirmation. Without an unexpired confirmation, generation
+stops and ZapFast reports that the license could not be verified.
 
 To draft a reply, ZapFast sends the selected provider the textual contents of up to 32 local
 messages from the previous seven days and the new incoming text. Text captions

@@ -1419,6 +1419,7 @@ impl Worker {
             let events = self.events.clone();
             let waker = self.waker.clone();
             let chat = batch.chat;
+            let license_cache = self.dirs.state.join("assistant-license.json");
             let provider = self.assistant_provider.clone();
             let connection = self.assistant_connection.clone();
             let knowledge_instructions = knowledge_instructions.clone();
@@ -1431,7 +1432,7 @@ impl Worker {
                         return;
                     }
                     result = async {
-                        match crate::license::check(&phone).await {
+                        match crate::license::check(&phone, &license_cache).await {
                             Ok(true) => {}
                             Ok(false) => return Err(AssistantRunError::Denied),
                             Err(_) => return Err(AssistantRunError::License),

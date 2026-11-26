@@ -97,11 +97,61 @@ async function checkLicense(request, env) {
     return json({ error: "Número de teléfono no válido." }, 400);
   }
   const row = await env.LICENSES.prepare(
-    "SELECT 1 AS valid FROM licenses WHERE phone = ? AND active = 1 AND date('now') BETWEEN starts_at AND expires_at LIMIT 1",
+    "SELECT active, starts_at, expires_at FROM licenses WHERE phone = ? LIMIT 1",
   )
     .bind(body.phone)
     .first();
-  return json({ valid: Boolean(row) });
+  const now = Math.floor(Date.now() / 1000);
+  const today = new Date(now * 1000).toISOString().slice(0, 10);
+  const valid =
+    Boolean(row) &&
+    row.active === 1 &&
+    row.starts_at <= today &&
+    row.expires_at >= today;
+  const licenseExpiresAt =
+    row && validDate(row.expires_at)
+      ? Math.floor(Date.parse(`${row.expires_at}T23:59:59.000Z`) / 1000)
+      : 0;
+  const graceUntil = valid
+    ? Math.min(now + 72 * 60 * 60, licenseExpiresAt)
+    : 0;
+  const attestation = {
+    valid,
+    phone: body.phone,
+    issued_at: now,
+    grace_until: graceUntil,
+    license_expires_at: licenseExpiresAt,
+  };
+  const payload = [
+    "zapfast-license-v1",
+    attestation.phone,
+    Number(attestation.valid),
+    attestation.issued_at,
+    attestation.grace_until,
+    attestation.license_expires_at,
+  ].join("\n");
+  const privateKeyBytes = Uint8Array.from(
+    atob(env.LICENSE_SIGNING_KEY),
+    (character) => character.charCodeAt(0),
+  );
+  const privateKey = await crypto.subtle.importKey(
+    "pkcs8",
+    privateKeyBytes,
+    { name: "Ed25519" },
+    false,
+    ["sign"],
+  );
+  const signature = new Uint8Array(
+    await crypto.subtle.sign(
+      "Ed25519",
+      privateKey,
+      new TextEncoder().encode(payload),
+    ),
+  );
+  attestation.signature = Array.from(signature, (byte) =>
+    byte.toString(16).padStart(2, "0"),
+  ).join("");
+  return json(attestation);
 }
 
 const page = `<!doctype html>
