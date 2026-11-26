@@ -162,7 +162,9 @@ pub struct SendTurn {
 
 #[derive(Debug)]
 pub enum Command {
-    PickPlugin,
+    PickPlugin {
+        locale: crate::i18n::Locale,
+    },
     ChatGptSignIn,
     ChatGptSignOut,
     ChatGptLoadStatus,

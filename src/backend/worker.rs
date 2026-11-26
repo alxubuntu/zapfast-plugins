@@ -7873,14 +7873,17 @@ impl Worker {
                     waker.wake();
                 });
             }
-            Command::PickPlugin => {
+            Command::PickPlugin { locale } => {
                 let events = self.events.clone();
                 let waker = self.waker.clone();
                 let root = self.dirs.plugins_dir();
                 tokio::task::spawn_blocking(move || {
                     let Some(path) = rfd::FileDialog::new()
-                        .set_title("Install plugin")
-                        .add_filter("ZapFast plugin", &["zapplugin"])
+                        .set_title(crate::i18n::gettext(locale, "Install plugin").as_ref())
+                        .add_filter(
+                            crate::i18n::gettext(locale, "ZapFast plugin").as_ref(),
+                            &["zapplugin"],
+                        )
                         .pick_file()
                     else {
                         return;

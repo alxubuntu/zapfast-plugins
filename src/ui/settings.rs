@@ -806,12 +806,23 @@ fn sections(app: &App) -> Vec<Section> {
         |ui, app| account(app, ui),
     );
 
-    let mut plugins = Section::new("Plugins".into());
+    let mut plugins = Section::new(translated(locale, "Plugins"));
     plugins.row(
-        "Install plugin",
-        "Choose a local .zapplugin package. Native plugins have your operating system permissions.",
+        translated(locale, "Install plugin"),
+        translated(
+            locale,
+            "Choose a local .zapplugin package. Native plugins have your operating system permissions.",
+        ),
         move |ui, app| {
-            if theme::soft_button(ui, &palette, None, "Install…", false).clicked() {
+            if theme::soft_button(
+                ui,
+                &palette,
+                None,
+                &crate::i18n::gettext(app.locale, "Install…"),
+                false,
+            )
+            .clicked()
+            {
                 app.actions.push(Action::InstallPlugin);
             }
         },
@@ -820,30 +831,27 @@ fn sections(app: &App) -> Vec<Section> {
     let chatgpt_label = app
         .chatgpt_email
         .clone()
-        .unwrap_or_else(|| "Not connected".into());
-    plugins.row("ChatGPT account", chatgpt_label, move |ui, app| {
-        if theme::soft_button(
-            ui,
-            &palette,
-            None,
-            if app.chatgpt_busy {
-                "Working…"
+        .unwrap_or_else(|| crate::i18n::gettext(locale, "Not connected").into_owned());
+    plugins.row(
+        translated(locale, "ChatGPT account"),
+        chatgpt_label,
+        move |ui, app| {
+            let button_label = if app.chatgpt_busy {
+                crate::i18n::gettext(app.locale, "Working…")
             } else if chatgpt_connected {
-                "Disconnect"
+                crate::i18n::gettext(app.locale, "Disconnect")
             } else {
-                "Continue with ChatGPT"
-            },
-            app.chatgpt_busy,
-        )
-        .clicked()
-        {
-            app.actions.push(if chatgpt_connected {
-                Action::ChatGptSignOut
-            } else {
-                Action::ChatGptSignIn
-            });
-        }
-    });
+                crate::i18n::gettext(app.locale, "Continue with ChatGPT")
+            };
+            if theme::soft_button(ui, &palette, None, &button_label, app.chatgpt_busy).clicked() {
+                app.actions.push(if chatgpt_connected {
+                    Action::ChatGptSignOut
+                } else {
+                    Action::ChatGptSignIn
+                });
+            }
+        },
+    );
     let selected_provider = app.settings.assistant_provider.clone();
     let provider_label = if selected_provider == "chatgpt" {
         "ChatGPT".to_owned()
@@ -853,10 +861,10 @@ fn sections(app: &App) -> Vec<Section> {
             .iter()
             .find(|connection| connection.id == selected_provider)
             .map(|connection| connection.name.clone())
-            .unwrap_or_else(|| "Unavailable connection".into())
+            .unwrap_or_else(|| crate::i18n::gettext(locale, "Unavailable connection").into_owned())
     };
     plugins.row(
-        "Default assistant provider",
+        translated(locale, "Default assistant provider"),
         provider_label,
         move |ui, app| {
             egui::ComboBox::from_id_salt("assistant-default-provider")
@@ -868,7 +876,9 @@ fn sections(app: &App) -> Vec<Section> {
                         .iter()
                         .find(|item| item.id == selected_provider)
                         .map(|item| item.name.clone())
-                        .unwrap_or_else(|| "Unavailable".into())
+                        .unwrap_or_else(|| {
+                            crate::i18n::gettext(app.locale, "Unavailable").into_owned()
+                        })
                 })
                 .show_ui(ui, |ui| {
                     if ui
@@ -892,21 +902,26 @@ fn sections(app: &App) -> Vec<Section> {
     );
     plugins.block(
         vec![
-            "OpenAI-compatible API".into(),
-            "OpenAI OpenRouter DeepSeek provider API key model connection".into(),
+            translated(locale, "OpenAI-compatible API"),
+            translated(locale, "OpenAI OpenRouter DeepSeek provider API key model connection"),
         ],
         move |ui, app| {
-            theme::text(ui, "OpenAI-compatible API", theme::medium(14.0), palette.text);
+            theme::text(
+                ui,
+                crate::i18n::gettext(app.locale, "OpenAI-compatible API"),
+                theme::medium(14.0),
+                palette.text,
+            );
             theme::paragraph(
                 ui,
-                "Add OpenAI, OpenRouter, DeepSeek, or another compatible provider. Keys are stored in the system credential store.",
+                crate::i18n::gettext(app.locale, "Add OpenAI, OpenRouter, DeepSeek, or another compatible provider. Keys are stored in the system credential store."),
                 theme::regular(12.5),
                 palette.secondary,
             );
             ui.add_space(8.0);
-            ui.label("Provider");
+            ui.label(crate::i18n::gettext(app.locale, "Provider"));
                 egui::ComboBox::from_id_salt("assistant-api-preset")
-                    .selected_text("Provider")
+                    .selected_text(crate::i18n::gettext(app.locale, "Provider"))
                     .show_ui(ui, |ui| {
                         for (name, url) in [
                             ("OpenAI", "https://api.openai.com/v1"),
@@ -919,16 +934,16 @@ fn sections(app: &App) -> Vec<Section> {
                             }
                         }
                     });
-            ui.label("Name");
+            ui.label(crate::i18n::gettext(app.locale, "Name"));
             ui.add(egui::TextEdit::singleline(&mut app.assistant_api_name).desired_width(ui.available_width()));
-            ui.label("Base URL");
+            ui.label(crate::i18n::gettext(app.locale, "Base URL"));
             ui.add(egui::TextEdit::singleline(&mut app.assistant_api_url).desired_width(ui.available_width()));
-            ui.label("API key");
+            ui.label(crate::i18n::gettext(app.locale, "API key"));
                 ui.add(egui::TextEdit::singleline(&mut app.assistant_api_key)
                     .password(true).desired_width(ui.available_width())
-                    .hint_text("Required for new, optional when editing"));
+                    .hint_text(crate::i18n::gettext(app.locale, "Required for new, optional when editing")));
             ui.add_space(6.0);
-                if theme::soft_button(ui, &palette, None, "Add / save", false).clicked() {
+                if theme::soft_button(ui, &palette, None, &crate::i18n::gettext(app.locale, "Add / save"), false).clicked() {
                     let id = app.assistant_api_editing.clone().or_else(|| app.settings.assistant_connections.iter()
                         .find(|item| item.name == app.assistant_api_name.trim())
                         .map(|item| item.id.clone()));
@@ -953,19 +968,19 @@ fn sections(app: &App) -> Vec<Section> {
                 ui.label(&connection.name);
                 ui.label(&connection.base_url);
                 ui.horizontal_wrapped(|ui| {
-                    if theme::soft_button(ui, &palette, None, "Edit", false).clicked() {
+                    if theme::soft_button(ui, &palette, None, &crate::i18n::gettext(app.locale, "Edit"), false).clicked() {
                         app.assistant_api_editing = Some(connection.id.clone());
                         app.assistant_api_name = connection.name.clone();
                         app.assistant_api_url = connection.base_url.clone();
                     }
-                    if theme::soft_button(ui, &palette, None, "Load models", false).clicked() {
+                    if theme::soft_button(ui, &palette, None, &crate::i18n::gettext(app.locale, "Load models"), false).clicked() {
                         app.actions.push(Action::LoadAssistantApiModels {
                             id: connection.id.clone(), base_url: connection.base_url.clone(),
                         });
                     }
                     if let Some(models) = app.assistant_api_models.get(&connection.id) {
                         egui::ComboBox::from_id_salt(("assistant-model", &connection.id))
-                            .selected_text(if connection.model.is_empty() { "Select model" } else { &connection.model })
+                                .selected_text(if connection.model.is_empty() { crate::i18n::gettext(app.locale, "Select model").into_owned() } else { connection.model.clone() })
                             .show_ui(ui, |ui| {
                                 for model in models {
                                     if ui.selectable_label(connection.model == *model, model).clicked() {
@@ -977,7 +992,7 @@ fn sections(app: &App) -> Vec<Section> {
                                 }
                             });
                     }
-                    if theme::soft_button(ui, &palette, None, "Remove", false).clicked() {
+                    if theme::soft_button(ui, &palette, None, &crate::i18n::gettext(app.locale, "Remove"), false).clicked() {
                         app.actions.push(Action::RemoveAssistantApiConnection(connection.id.clone()));
                     }
                 });
@@ -987,14 +1002,14 @@ fn sections(app: &App) -> Vec<Section> {
     );
     let assistant_enabled = app.settings.assistant_enabled;
     plugins.row(
-        "OpenAI assistant",
-        "Uses unread direct chats by default. Message text and recent local history are sent to OpenAI to draft replies.",
+        translated(locale, "OpenAI assistant"),
+        translated(locale, "Uses unread direct chats by default. Message text and recent local history are sent to the selected provider to draft replies."),
         move |ui, app| {
             if theme::soft_button(
                 ui,
                 &palette,
                 None,
-                if assistant_enabled { "Disable" } else { "Enable…"},
+                &crate::i18n::gettext(app.locale, if assistant_enabled { "Disable" } else { "Enable…"}),
                 false,
             )
             .clicked()
@@ -1011,14 +1026,14 @@ fn sections(app: &App) -> Vec<Section> {
     );
     let knowledge_only = app.settings.assistant_knowledge_only;
     plugins.row(
-        "Knowledge-only replies",
-        "Sends assistant.txt to the selected provider and instructs the model to use only its facts. Missing or invalid files stop generation; model compliance is not guaranteed.",
+        translated(locale, "Knowledge-only replies"),
+        translated(locale, "Sends assistant.txt to the selected provider and instructs the model to use only its facts. Missing or invalid files stop generation; model compliance is not guaranteed."),
         move |ui, app| {
             if theme::soft_button(
                 ui,
                 &palette,
                 None,
-                if knowledge_only { "Disable" } else { "Enable" },
+                &crate::i18n::gettext(app.locale, if knowledge_only { "Disable" } else { "Enable" }),
                 false,
             )
             .clicked()
@@ -1029,14 +1044,30 @@ fn sections(app: &App) -> Vec<Section> {
         },
     );
     plugins.row(
-        "Assistant knowledge file",
+        translated(locale, "Assistant knowledge file"),
         app.dirs.assistant_knowledge_file().display().to_string(),
         move |ui, app| {
             ui.horizontal_wrapped(|ui| {
-                if theme::soft_button(ui, &palette, None, "Create template", false).clicked() {
+                if theme::soft_button(
+                    ui,
+                    &palette,
+                    None,
+                    &crate::i18n::gettext(app.locale, "Create template"),
+                    false,
+                )
+                .clicked()
+                {
                     app.actions.push(Action::InitializeAssistantKnowledge);
                 }
-                if theme::soft_button(ui, &palette, None, "Open file", false).clicked() {
+                if theme::soft_button(
+                    ui,
+                    &palette,
+                    None,
+                    &crate::i18n::gettext(app.locale, "Open file"),
+                    false,
+                )
+                .clicked()
+                {
                     app.actions.push(Action::OpenAssistantKnowledge);
                 }
             });
@@ -1051,8 +1082,8 @@ fn sections(app: &App) -> Vec<Section> {
         .cloned()
         .collect();
     plugins.row(
-        "Transcribe voice notes for drafts",
-        "When enabled, incoming voice notes in eligible chats are sent to OpenAI for transcription. The transcript may then be sent to your selected reply provider.",
+        translated(locale, "Transcribe voice notes for drafts"),
+        translated(locale, "When enabled, incoming voice notes in eligible chats are sent to OpenAI for transcription. The transcript may then be sent to your selected reply provider."),
         move |ui, app| {
             egui::ComboBox::from_id_salt("assistant-voice-transcription")
                 .selected_text(
@@ -1060,11 +1091,11 @@ fn sections(app: &App) -> Vec<Section> {
                         .as_ref()
                         .and_then(|id| openai_connections.iter().find(|item| &item.id == id))
                         .map(|item| item.name.as_str())
-                        .unwrap_or("Off"),
+                        .unwrap_or(crate::i18n::gettext(app.locale, "Off").as_ref()),
                 )
                 .show_ui(ui, |ui| {
                     if ui
-                        .selectable_label(voice_connection.is_none(), "Off")
+                        .selectable_label(voice_connection.is_none(), crate::i18n::gettext(app.locale, "Off"))
                         .clicked()
                     {
                         app.actions
@@ -1094,14 +1125,14 @@ fn sections(app: &App) -> Vec<Section> {
             format!(
                 "Version {} · {} for this account; choose chats in More",
                 plugin.version,
-                if enabled { "enabled" } else { "disabled" }
+                crate::i18n::gettext(locale, if enabled { "Enabled" } else { "Disabled" }),
             ),
             move |ui, app| {
                 if theme::soft_button(
                     ui,
                     &palette,
                     None,
-                    if enabled { "Disable" } else { "Enable" },
+                    &crate::i18n::gettext(app.locale, if enabled { "Disable" } else { "Enable" }),
                     false,
                 )
                 .clicked()
@@ -1111,7 +1142,15 @@ fn sections(app: &App) -> Vec<Section> {
                         enabled: !enabled,
                     });
                 }
-                if theme::soft_button(ui, &palette, None, "Uninstall…", false).clicked() {
+                if theme::soft_button(
+                    ui,
+                    &palette,
+                    None,
+                    &crate::i18n::gettext(app.locale, "Uninstall…"),
+                    false,
+                )
+                .clicked()
+                {
                     app.actions.push(Action::AskUninstallPlugin(id));
                 }
             },

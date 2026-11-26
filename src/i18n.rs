@@ -416,6 +416,18 @@ mod tests {
     #[test]
     fn remaining_pilot_catalogs_translate() {
         assert_eq!(gettext(Locale::Spanish, "Search"), "Buscar");
+        assert_eq!(
+            gettext(
+                Locale::Spanish,
+                "The assistant is not licensed for this WhatsApp number."
+            ),
+            "El asistente no tiene una licencia válida para este número de WhatsApp."
+        );
+        assert_eq!(gettext(Locale::Spanish, "Plugins"), "Complementos");
+        assert_eq!(
+            gettext(Locale::Spanish, "Install plugin"),
+            "Instalar complemento"
+        );
         assert_eq!(gettext(Locale::French, "Search"), "Rechercher");
         assert_eq!(gettext(Locale::Italian, "Search"), "Cerca");
         assert_eq!(gettext(Locale::Russian, "Search"), "Поиск");

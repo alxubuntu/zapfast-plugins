@@ -9829,7 +9829,9 @@ impl App {
                 self.page = Page::Settings;
                 self.focus_settings_search = true;
             }
-            Action::InstallPlugin => self.backend.send(Command::PickPlugin),
+            Action::InstallPlugin => self.backend.send(Command::PickPlugin {
+                locale: self.locale,
+            }),
             Action::ChatGptSignIn => {
                 if !self.chatgpt_busy {
                     self.chatgpt_busy = true;
@@ -10990,7 +10992,7 @@ impl App {
     }
 
     pub fn toast(&mut self, message: impl Into<String>) {
-        let message = message.into();
+        let message = localized_assistant_plugin_notice(self.locale, &message.into());
         let said = self.toast_said(&message);
         self.announcer.say(crate::announcer::Category::Toast, said);
         self.toasts.push(Toast {
@@ -11041,7 +11043,7 @@ impl App {
     }
 
     pub fn toast_error(&mut self, message: impl Into<String>) {
-        let message = message.into();
+        let message = localized_assistant_plugin_notice(self.locale, &message.into());
         let said = self.toast_said(&message);
         self.announcer.say(crate::announcer::Category::Error, said);
         log::warn!("an operation failed; details are shown in the window");
@@ -12861,6 +12863,75 @@ fn native_clipboard_image(bytes: &[u8]) -> Result<(usize, usize, Vec<u8>), Strin
     ))
 }
 
+fn localized_assistant_plugin_notice(locale: Locale, message: &str) -> String {
+    const MESSAGES: &[&str] = &[
+        "Plugin installed. Enable it for this account in Settings.",
+        "Could not install plugin:",
+        "ChatGPT connection failed:",
+        "Signed out locally; ChatGPT could not confirm remote revocation.",
+        "Disconnected from ChatGPT.",
+        "Connected to ChatGPT.",
+        "API connection saved securely. Load its model catalog.",
+        "Could not remove API key:",
+        "Could not load provider models:",
+        "Could not save API key:",
+        "Could not create an API connection ID:",
+        "Enter a connection name and an HTTPS API base URL.",
+        "Enter an API key for a new connection.",
+        "Disable the assistant before changing the active provider's API destination.",
+        "Load the provider's model catalog and select a model first.",
+        "Connect ChatGPT or configure an API connection before enabling the assistant.",
+        "Assistant knowledge template is ready. Edit assistant.txt, then enable knowledge-only mode.",
+        "Could not create assistant knowledge file:",
+        "Could not open assistant.txt:",
+        "Create assistant.txt first from Settings → Plugins.",
+        "Voice transcription requires a saved official OpenAI API connection.",
+        "Plugin uninstalled; its settings and chat permissions were removed.",
+        "Could not uninstall plugin.",
+        "The assistant is not licensed for this WhatsApp number.",
+        "Could not verify the assistant license. Check your internet connection and try again.",
+        "Could not generate an assistant draft. Check the selected provider, API key, model access, or usage limits.",
+        "The assistant knowledge file is missing, empty, invalid, or too large. Check it in Settings → Plugins.",
+        "Voice note transcription is limited to five minutes.",
+        "Voice note transcription is limited to four MiB.",
+        "Could not download a voice note for assistant transcription.",
+        "Generated replies are saved only as drafts. ZapFast will never send them automatically or replace existing composer text or attachments.",
+        "This removes the plugin, its settings, and its chat permissions. Messages and drafts are kept.",
+        "Uninstall this plugin?",
+        "Enable the OpenAI assistant?",
+        "Allow this provider to receive assistant context?",
+        "The assistant will send eligible chat text and recent local context to {provider}. Only drafts are generated; messages are never sent automatically.",
+        "ZapFast will send text from eligible unread direct chats and up to 32 local messages from the previous seven days to {provider}. Groups and locked chats are excluded.",
+        "Uses unread direct chats by default. Message text and recent local history are sent to the selected provider to draft replies.",
+        "Sends assistant.txt to the selected provider and instructs the model to use only its facts. Missing or invalid files stop generation; model compliance is not guaranteed.",
+        "When enabled, incoming voice notes in eligible chats are sent to OpenAI for transcription. The transcript may then be sent to your selected reply provider.",
+        "Choose a local .zapplugin package. Native plugins have your operating system permissions.",
+        "OpenAI OpenRouter DeepSeek provider API key model connection",
+        "Add OpenAI, OpenRouter, DeepSeek, or another compatible provider. Keys are stored in the system credential store.",
+        "Version {} · {} for this account; choose chats in More",
+    ];
+    let key = MESSAGES
+        .iter()
+        .copied()
+        .find(|key| message == *key || message.starts_with(&format!("{key} ")))
+        .or_else(|| {
+            MESSAGES
+                .iter()
+                .copied()
+                .find(|key| key.ends_with(':') && message.starts_with(key))
+        });
+    if let Some(key) = key {
+        let translated = crate::i18n::gettext(locale, key);
+        if message == key {
+            translated.into_owned()
+        } else {
+            format!("{}{}", translated, &message[key.len()..])
+        }
+    } else {
+        message.to_owned()
+    }
+}
+
 #[cfg(test)]
 mod native_clipboard_tests {
     use super::*;
@@ -13127,6 +13198,28 @@ fn composer_format_spans(
 mod tests {
     use super::*;
     use crate::model::{ChatKind, Content, Dialog, Media, MediaState, ReplyTarget, ToastKind};
+
+    #[test]
+    fn assistant_and_plugin_notices_follow_the_selected_locale() {
+        assert_eq!(
+            localized_assistant_plugin_notice(
+                Locale::Spanish,
+                "The assistant is not licensed for this WhatsApp number."
+            ),
+            "El asistente no tiene una licencia válida para este número de WhatsApp."
+        );
+        assert_eq!(
+            localized_assistant_plugin_notice(
+                Locale::Spanish,
+                "Could not create an API connection ID: storage unavailable"
+            ),
+            "No se pudo crear el identificador de la conexión API: storage unavailable"
+        );
+        assert_eq!(
+            localized_assistant_plugin_notice(Locale::Spanish, "An unrelated error"),
+            "An unrelated error"
+        );
+    }
 
     fn composer_undo_boundary_frame(
         app: &mut App,

@@ -1676,19 +1676,22 @@ fn confirm_enable_assistant(app: &mut App, ui: &mut egui::Ui) {
             .iter()
             .find(|connection| connection.id == app.settings.assistant_provider)
             .map(|connection| connection.name.clone())
-            .unwrap_or_else(|| "the selected provider".into())
+            .unwrap_or_else(|| crate::i18n::gettext(locale, "the selected provider").into_owned())
     };
-    let disclosure = format!(
-        "ZapFast will send text from eligible unread direct chats and up to 32 local messages from the previous seven days to {provider}. Groups and locked chats are excluded."
+    let disclosure = crate::i18n::gettext(
+        locale,
+        "ZapFast will send text from eligible unread direct chats and up to 32 local messages from the previous seven days to {provider}. Groups and locked chats are excluded.",
+    )
+    .replace("{provider}", &provider);
+    let drafts_only = crate::i18n::gettext(
+        locale,
+        "Generated replies are saved only as drafts. ZapFast will never send them automatically or replace existing composer text or attachments.",
     );
     confirm_destructive(
         app,
         ui,
         &crate::i18n::gettext(locale, "Enable the OpenAI assistant?"),
-        &[
-            disclosure.as_str(),
-            "Generated replies are saved only as drafts. ZapFast will never send them automatically or replace existing composer text or attachments.",
-        ],
+        &[disclosure.as_str(), drafts_only.as_ref()],
         &crate::i18n::gettext(locale, "Enable"),
         [Action::SetAssistantEnabled(true)],
     );
@@ -1703,17 +1706,24 @@ fn confirm_assistant_provider(app: &mut App, ui: &mut egui::Ui, provider_id: &st
             .iter()
             .find(|connection| connection.id == provider_id)
             .map(|connection| connection.name.clone())
-            .unwrap_or_else(|| "the selected provider".into())
+            .unwrap_or_else(|| {
+                crate::i18n::gettext(app.locale, "the selected provider").into_owned()
+            })
     };
-    let disclosure = format!(
-        "The assistant will send eligible chat text and recent local context to {provider}. Only drafts are generated; messages are never sent automatically."
-    );
+    let disclosure = crate::i18n::gettext(
+        app.locale,
+        "The assistant will send eligible chat text and recent local context to {provider}. Only drafts are generated; messages are never sent automatically.",
+    )
+    .replace("{provider}", &provider);
     confirm_destructive(
         app,
         ui,
-        "Allow this provider to receive assistant context?",
+        &crate::i18n::gettext(
+            app.locale,
+            "Allow this provider to receive assistant context?",
+        ),
         &[disclosure.as_str()],
-        "Continue",
+        &crate::i18n::gettext(app.locale, "Continue"),
         [Action::ConfirmAssistantProvider(provider_id.to_owned())],
     );
 }

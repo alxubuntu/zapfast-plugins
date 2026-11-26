@@ -59,6 +59,251 @@ msgstr "Has creado demasiados grupos recientemente. Inténtalo más tarde."
 msgid "WhatsApp did not accept this group's name or members."
 msgstr "WhatsApp no aceptó el nombre o los miembros de este grupo."
 
+#. Plugins and assistant settings
+msgid "Plugins"
+msgstr "Complementos"
+
+msgid "Install plugin"
+msgstr "Instalar complemento"
+
+msgid "Choose a local .zapplugin package. Native plugins have your operating system permissions."
+msgstr "Elige un paquete local .zapplugin. Los complementos nativos tienen los permisos de tu usuario en el sistema operativo."
+
+msgid "Install…"
+msgstr "Instalar…"
+
+msgid "ChatGPT account"
+msgstr "Cuenta de ChatGPT"
+
+msgid "Not connected"
+msgstr "No conectada"
+
+msgid "Working…"
+msgstr "Procesando…"
+
+msgid "Disconnect"
+msgstr "Desconectar"
+
+msgid "Continue with ChatGPT"
+msgstr "Continuar con ChatGPT"
+
+msgid "Default assistant provider"
+msgstr "Proveedor predeterminado del asistente"
+
+msgid "the selected provider"
+msgstr "el proveedor seleccionado"
+
+msgid "Unavailable connection"
+msgstr "Conexión no disponible"
+
+msgid "Unavailable"
+msgstr "No disponible"
+
+msgid "OpenAI-compatible API"
+msgstr "API compatible con OpenAI"
+
+msgid "OpenAI OpenRouter DeepSeek provider API key model connection"
+msgstr "OpenAI OpenRouter DeepSeek proveedor API clave modelo conexión"
+
+msgid "Add OpenAI, OpenRouter, DeepSeek, or another compatible provider. Keys are stored in the system credential store."
+msgstr "Agrega OpenAI, OpenRouter, DeepSeek u otro proveedor compatible. Las claves se guardan en el almacén de credenciales del sistema."
+
+msgid "Provider"
+msgstr "Proveedor"
+
+msgid "Name"
+msgstr "Nombre"
+
+msgid "Base URL"
+msgstr "URL base"
+
+msgid "API key"
+msgstr "Clave de API"
+
+msgid "Required for new, optional when editing"
+msgstr "Obligatoria para una conexión nueva; opcional al editar"
+
+msgid "Add / save"
+msgstr "Agregar / guardar"
+
+msgid "Load models"
+msgstr "Cargar modelos"
+
+msgid "Select model"
+msgstr "Seleccionar modelo"
+
+msgid "OpenAI assistant"
+msgstr "Asistente de OpenAI"
+
+msgid "Uses unread direct chats by default. Message text and recent local history are sent to the selected provider to draft replies."
+msgstr "Usa los chats directos no leídos de forma predeterminada. El texto de los mensajes y el historial local reciente se envían al proveedor seleccionado para preparar borradores de respuesta."
+
+msgid "Disable"
+msgstr "Desactivar"
+
+msgid "Enable"
+msgstr "Activar"
+
+msgid "Enable…"
+msgstr "Activar…"
+
+msgid "Knowledge-only replies"
+msgstr "Respuestas solo con información de referencia"
+
+msgid "Sends assistant.txt to the selected provider and instructs the model to use only its facts. Missing or invalid files stop generation; model compliance is not guaranteed."
+msgstr "Envía assistant.txt al proveedor seleccionado e indica al modelo que use únicamente los datos del archivo. Si falta o no es válido, se detiene la generación; no se puede garantizar que el modelo siga la instrucción."
+
+msgid "Assistant knowledge file"
+msgstr "Archivo de información del asistente"
+
+msgid "Create template"
+msgstr "Crear plantilla"
+
+msgid "Transcribe voice notes for drafts"
+msgstr "Transcribir notas de voz para los borradores"
+
+msgid "When enabled, incoming voice notes in eligible chats are sent to OpenAI for transcription. The transcript may then be sent to your selected reply provider."
+msgstr "Si se activa, las notas de voz recibidas en chats aptos se envían a OpenAI para transcribirlas. Después, la transcripción puede enviarse al proveedor de respuestas seleccionado."
+
+msgid "Enabled"
+msgstr "Activado"
+
+msgid "Disabled"
+msgstr "Desactivado"
+
+#, rust-format
+msgid "Version {} · {} for this account; choose chats in More"
+msgstr "Versión {} · {} para esta cuenta; elige los chats en Más"
+
+msgid "Plugins in this chat"
+msgstr "Complementos en este chat"
+
+#, rust-format
+msgid "Enable the OpenAI assistant?"
+msgstr "¿Activar el asistente de OpenAI?"
+
+#, rust-format
+msgid "ZapFast will send text from eligible unread direct chats and up to 32 local messages from the previous seven days to {provider}. Groups and locked chats are excluded."
+msgstr "ZapFast enviará al proveedor {provider} el texto de los chats directos no leídos aptos y hasta 32 mensajes locales de los últimos siete días. Se excluyen los grupos y los chats bloqueados."
+
+msgid "Generated replies are saved only as drafts. ZapFast will never send them automatically or replace existing composer text or attachments."
+msgstr "Las respuestas generadas se guardan únicamente como borradores. ZapFast nunca las enviará automáticamente ni sustituirá el texto o los archivos adjuntos que ya estén en el cuadro de redacción."
+
+#, rust-format
+msgid "The assistant will send eligible chat text and recent local context to {provider}. Only drafts are generated; messages are never sent automatically."
+msgstr "El asistente enviará al proveedor {provider} el texto de los chats aptos y el contexto local reciente. Solo se crearán borradores; nunca se enviarán mensajes automáticamente."
+
+msgid "Allow this provider to receive assistant context?"
+msgstr "¿Permitir que este proveedor reciba el contexto del asistente?"
+
+msgid "Continue"
+msgstr "Continuar"
+
+msgid "Uninstall this plugin?"
+msgstr "¿Desinstalar este complemento?"
+
+msgid "This removes the plugin, its settings, and its chat permissions. Messages and drafts are kept."
+msgstr "Esto elimina el complemento, su configuración y sus permisos en los chats. Los mensajes y borradores se conservan."
+
+msgid "Uninstall"
+msgstr "Desinstalar"
+
+msgid "Uninstall…"
+msgstr "Desinstalar…"
+
+msgid "ZapFast plugin"
+msgstr "Complemento de ZapFast"
+
+msgid "The assistant is not licensed for this WhatsApp number."
+msgstr "El asistente no tiene una licencia válida para este número de WhatsApp."
+
+msgid "Could not verify the assistant license. Check your internet connection and try again."
+msgstr "No se pudo verificar la licencia del asistente. Comprueba tu conexión a Internet e inténtalo de nuevo."
+
+msgid "Could not generate an assistant draft. Check the selected provider, API key, model access, or usage limits."
+msgstr "No se pudo generar el borrador del asistente. Comprueba el proveedor seleccionado, la clave de API, el acceso al modelo o los límites de uso."
+
+msgid "The assistant knowledge file is missing, empty, invalid, or too large. Check it in Settings → Plugins."
+msgstr "El archivo de información del asistente falta, está vacío, no es válido o es demasiado grande. Revísalo en Ajustes → Complementos."
+
+msgid "Voice note transcription is limited to five minutes."
+msgstr "La transcripción de notas de voz está limitada a cinco minutos."
+
+msgid "Voice note transcription is limited to four MiB."
+msgstr "La transcripción de notas de voz está limitada a cuatro MiB."
+
+msgid "Could not download a voice note for assistant transcription."
+msgstr "No se pudo descargar una nota de voz para transcribirla con el asistente."
+
+msgid "Plugin installed. Enable it for this account in Settings."
+msgstr "Complemento instalado. Actívalo para esta cuenta en Ajustes."
+
+msgid "ChatGPT connection failed:"
+msgstr "No se pudo conectar con ChatGPT:"
+
+msgid "Signed out locally; ChatGPT could not confirm remote revocation."
+msgstr "Se cerró la sesión local, pero ChatGPT no pudo confirmar la revocación remota."
+
+msgid "Disconnected from ChatGPT."
+msgstr "Se desconectó ChatGPT."
+
+msgid "Connected to ChatGPT."
+msgstr "ChatGPT está conectado."
+
+msgid "API connection saved securely. Load its model catalog."
+msgstr "La conexión API se guardó de forma segura. Carga su catálogo de modelos."
+
+msgid "Could not save API key:"
+msgstr "No se pudo guardar la clave de API:"
+
+msgid "Could not remove API key:"
+msgstr "No se pudo eliminar la clave de API:"
+
+msgid "Could not load provider models:"
+msgstr "No se pudieron cargar los modelos del proveedor:"
+
+msgid "Could not create an API connection ID:"
+msgstr "No se pudo crear el identificador de la conexión API:"
+
+msgid "Enter a connection name and an HTTPS API base URL."
+msgstr "Introduce un nombre para la conexión y una URL base de API HTTPS."
+
+msgid "Enter an API key for a new connection."
+msgstr "Introduce una clave de API para la conexión nueva."
+
+msgid "Disable the assistant before changing the active provider's API destination."
+msgstr "Desactiva el asistente antes de cambiar la dirección API del proveedor activo."
+
+msgid "Load the provider's model catalog and select a model first."
+msgstr "Primero carga el catálogo de modelos del proveedor y selecciona un modelo."
+
+msgid "Connect ChatGPT or configure an API connection before enabling the assistant."
+msgstr "Conecta ChatGPT o configura una conexión API antes de activar el asistente."
+
+msgid "Assistant knowledge template is ready. Edit assistant.txt, then enable knowledge-only mode."
+msgstr "La plantilla de información del asistente está lista. Edita assistant.txt y luego activa el modo de información de referencia."
+
+msgid "Create assistant.txt first from Settings → Plugins."
+msgstr "Primero crea assistant.txt desde Ajustes → Complementos."
+
+msgid "Could not create assistant knowledge file:"
+msgstr "No se pudo crear el archivo de información del asistente:"
+
+msgid "Could not open assistant.txt:"
+msgstr "No se pudo abrir assistant.txt:"
+
+msgid "Voice transcription requires a saved official OpenAI API connection."
+msgstr "La transcripción de voz requiere una conexión API oficial de OpenAI guardada."
+
+msgid "Plugin uninstalled; its settings and chat permissions were removed."
+msgstr "Complemento desinstalado; se eliminaron su configuración y sus permisos en los chats."
+
+msgid "Could not uninstall plugin."
+msgstr "No se pudo desinstalar el complemento."
+
+msgid "Could not install plugin:"
+msgstr "No se pudo instalar el complemento:"
+
 #: src/new_group.rs:219
 msgid "Could not create the group. Try again."
 msgstr "No se pudo crear el grupo. Inténtalo de nuevo."

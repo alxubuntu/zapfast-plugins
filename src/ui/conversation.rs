@@ -730,7 +730,7 @@ fn header(app: &mut App, ui: &mut egui::Ui, chat: &Chat) -> Rect {
                         .iter()
                         .any(|id| id == &chat.id);
                     let assistant_label = format!(
-                        "{} OpenAI assistant",
+                        "{} {}",
                         crate::i18n::gettext(
                             app.locale,
                             if assistant_selected {
@@ -738,7 +738,8 @@ fn header(app: &mut App, ui: &mut egui::Ui, chat: &Chat) -> Rect {
                             } else {
                                 "Enable"
                             }
-                        )
+                        ),
+                        crate::i18n::gettext(app.locale, "OpenAI assistant")
                     );
                     let mut menu_labels = vec![
                         search_label.as_ref(),
